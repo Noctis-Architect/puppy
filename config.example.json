@@ -1,0 +1,28 @@
+{
+  "api_id": 0,
+  "api_hash": "YOUR_API_HASH_FROM_my.telegram.org",
+  "bot_token": "YOUR_BOT_TOKEN_FROM_BotFather",
+  "super_admin_id": 0,
+  "database_url": "sqlite+aiosqlite:///data/app.db",
+  "sessions_dir": "session",
+  "proxy": {
+    "type": "",
+    "host": "",
+    "port": 0,
+    "username": "",
+    "password": "",
+    "secret": ""
+  },
+  "cleanup": {
+    "hour": 3,
+    "minute": 0,
+    "timezone": "Asia/Tehran",
+    "retention_days": 90
+  },
+  "monitoring": {
+    "unread_scan_interval_seconds": 60
+  },
+  "logging": {
+    "level": "INFO"
+  }
+}
