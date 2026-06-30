@@ -17,6 +17,7 @@ from app.bot.concurrency import account_client_lock
 from app.bot.keyboards import registered_menu_keyboard
 from app.bot.service_context import ServiceContext
 from app.modules.group_tools.states import GroupToolsStates
+from app.modules.contact_tracking.service import capture_profile_snapshot
 from app.modules.settings.repository import MonitoredChatRepository, TrackedTargetRepository
 from app.repositories.account_repo import AccountRepository
 from app.telegram.client_utils import SessionExpiredError, ensure_client_connected
@@ -87,12 +88,15 @@ async def track_from_forward(
     message: Message,
     state: FSMContext,
     session_factory: async_sessionmaker[AsyncSession],
+    service_context: ServiceContext | None = None,
 ) -> None:
     user_id = _forwarded_user_id(message)
     if user_id is None:
         await message.answer("فقط فوروارد پیام از یک کاربر پشتیبانی می‌شود.")
         return
-    await _add_target(message, state, session_factory, user_id)
+    await _add_target(
+        message, state, session_factory, user_id, service_context=service_context
+    )
 
 
 @router.message(GroupToolsStates.track_add, F.text.regexp(r"^-?\d+$"))
@@ -100,8 +104,15 @@ async def track_from_id(
     message: Message,
     state: FSMContext,
     session_factory: async_sessionmaker[AsyncSession],
+    service_context: ServiceContext | None = None,
 ) -> None:
-    await _add_target(message, state, session_factory, int(message.text))
+    await _add_target(
+        message,
+        state,
+        session_factory,
+        int(message.text),
+        service_context=service_context,
+    )
 
 
 @router.message(GroupToolsStates.track_add, F.text.regexp(r"^@?[A-Za-z][A-Za-z0-9_]{4,31}$"))
@@ -135,7 +146,14 @@ async def track_from_username(
             await message.answer(f"کاربر @{username} پیدا نشد.")
             return
 
-    await _add_target(message, state, session_factory, entity.id, label=f"@{username}")
+    await _add_target(
+        message,
+        state,
+        session_factory,
+        entity.id,
+        label=f"@{username}",
+        service_context=service_context,
+    )
 
 
 @router.message(GroupToolsStates.track_add, F.text == BACK_BUTTON)
@@ -171,6 +189,7 @@ async def _add_target(
     user_id: int,
     *,
     label: str | None = None,
+    service_context: ServiceContext | None = None,
 ) -> None:
     async with session_factory() as db:
         account = await get_own_account(AccountRepository(db), message.from_user.id)
@@ -193,11 +212,30 @@ async def _add_target(
             label=label,
         )
         await db.commit()
+        account_id = account.id
+
+    if service_context and account_id in service_context.pool.clients:
+        managed = service_context.pool.clients[account_id]
+        lock = account_client_lock(account_id)
+        try:
+            async with lock:
+                await capture_profile_snapshot(
+                    client=managed.client,
+                    session_factory=session_factory,
+                    account_id=account_id,
+                    target_user_id=user_id,
+                )
+        except Exception:
+            logger.warning(
+                "Initial profile snapshot failed target=%s",
+                user_id,
+                exc_info=True,
+            )
 
     await state.clear()
     await message.answer(
         f"✅ فرد <code>{user_id}</code> به لیست ردیابی اضافه شد.\n"
-        "تغییرات پروفایل، آنلاین‌بودن و پیام‌هایش ردیابی می‌شود.",
+        "تغییرات پروفایل، آنلاین‌بودن، استوری و پیام‌هایش ردیابی می‌شود.",
         reply_markup=registered_menu_keyboard(),
     )
 

@@ -118,15 +118,9 @@ def register_events(ctx: TelethonContext) -> None:
         if not deleted_ids:
             return
 
-        if chat_id is None:
-            logger.warning(
-                "Skipping deletion without chat_id account=%s ids=%s",
-                account_id,
-                deleted_ids,
-            )
-            return
-
-        if chat_id < 0:
+        # Private chats and small groups: Telegram sends no peer on delete (chat_id is None).
+        # We match stored rows by message_id alone — see Telethon MessageDeleted docs.
+        if chat_id is not None and chat_id < 0:
             if not await _is_monitored_group(session_factory, account_id, chat_id):
                 return
 

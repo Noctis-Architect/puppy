@@ -2,15 +2,22 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime
 from pathlib import Path
 
 from apscheduler.triggers.interval import IntervalTrigger
 from telethon.errors import RPCError
-from telethon.tl.functions.stories import GetPeerStoriesRequest
-from telethon.tl.functions.users import GetFullUserRequest
+from telethon.tl.functions.stories import GetAllStoriesRequest, GetPeerStoriesRequest
 
+from app.bot.concurrency import account_client_lock
 from app.core.module_api import JobContext
-from app.modules.contact_tracking.repository import ContactTrackingRepository
+from app.modules.contact_tracking.service import archive_story_item, capture_profile_snapshot
+from app.modules.contact_tracking.utils import (
+    extract_story_items,
+    is_user_peer,
+    peer_to_user_id,
+    story_mentions_user,
+)
 from app.modules.settings.repository import AccountSettingsRepository, TrackedTargetRepository
 from app.telegram.client_utils import ensure_client_connected
 
@@ -18,14 +25,6 @@ logger = logging.getLogger(__name__)
 
 SCAN_INTERVAL_SECONDS = 300
 STORY_INTERVAL_SECONDS = 600
-
-
-async def _fetch_bio(client, entity) -> str | None:
-    try:
-        full = await client(GetFullUserRequest(entity))
-        return getattr(full.full_user, "about", None)
-    except Exception:
-        return getattr(entity, "about", None) or getattr(entity, "bio", None)
 
 
 async def _scan_profiles(ctx: JobContext) -> None:
@@ -41,76 +40,100 @@ async def _scan_profiles(ctx: JobContext) -> None:
                 continue
             targets = await TrackedTargetRepository(session).list_for_account(account_id)
 
+        notify_chat_id = managed.account.bot_chat_id or managed.account.telegram_id
+        lock = account_client_lock(account_id)
+
         for target in targets:
             if not target.track_profile:
                 continue
             try:
-                entity = await managed.client.get_entity(target.target_user_id)
+                async with lock:
+                    await capture_profile_snapshot(
+                        client=managed.client,
+                        session_factory=ctx.session_factory,
+                        account_id=account_id,
+                        target_user_id=target.target_user_id,
+                        notify_bot=ctx.bot,
+                        notify_chat_id=notify_chat_id,
+                    )
             except RPCError as exc:
-                if ctx.bot and managed.account.bot_chat_id:
+                if ctx.bot and notify_chat_id:
                     await ctx.bot.send_message(
-                        managed.account.bot_chat_id or managed.account.telegram_id,
+                        notify_chat_id,
                         f"⚠️ دسترسی به <code>{target.target_user_id}</code> قطع شد: {type(exc).__name__}",
                         protect_content=True,
                     )
-                continue
             except Exception:
-                logger.debug(
-                    "Profile fetch failed target=%s",
+                logger.warning(
+                    "Profile fetch failed account=%s target=%s",
+                    account_id,
                     target.target_user_id,
                     exc_info=True,
                 )
-                continue
-
-            display_name = " ".join(
-                p for p in (getattr(entity, "first_name", ""), getattr(entity, "last_name", "")) if p
-            ).strip() or None
-            username = getattr(entity, "username", None)
-            bio = await _fetch_bio(managed.client, entity)
-            photo_id = None
-            if getattr(entity, "photo", None):
-                photo_id = str(getattr(entity.photo, "photo_id", ""))
-
-            async with ctx.session_factory() as session:
-                repo = ContactTrackingRepository(session)
-                old = await repo.get_snapshot(
-                    account_id=account_id, target_user_id=target.target_user_id
-                )
-                snap = await repo.upsert_snapshot(
-                    account_id=account_id,
-                    target_user_id=target.target_user_id,
-                    display_name=display_name,
-                    username=username,
-                    bio=bio,
-                    photo_id=photo_id,
-                )
-                changes: list[tuple[str, str | None, str | None]] = []
-                if old:
-                    for field, old_v, new_v in (
-                        ("name", old.display_name, snap.display_name),
-                        ("username", old.username, snap.username),
-                        ("bio", old.bio, snap.bio),
-                        ("photo", old.photo_id, snap.photo_id),
-                    ):
-                        if old_v != new_v:
-                            changes.append((field, old_v, new_v))
-                            await repo.add_profile_change(
-                                account_id=account_id,
-                                target_user_id=target.target_user_id,
-                                field=field,
-                                old_value=old_v,
-                                new_value=new_v,
-                            )
-                await session.commit()
-
-            if changes and ctx.bot:
-                chat_id = managed.account.bot_chat_id or managed.account.telegram_id
-                lines = [f"👤 تغییر پروفایل <code>{target.target_user_id}</code>", ""]
-                for field, old_v, new_v in changes:
-                    lines.append(f"• {field}: {old_v or '-'} → {new_v or '-'}")
-                await ctx.bot.send_message(chat_id, "\n".join(lines), protect_content=True)
-
             await asyncio.sleep(0.5)
+
+
+async def _collect_story_sources(
+    client,
+    *,
+    owner_user_id: int,
+    tracked_ids: set[int],
+) -> list[tuple[int, object, str]]:
+    """Return (user_id, story_item, note) tuples to archive."""
+    pending: list[tuple[int, object, str]] = []
+    seen: set[tuple[int, int]] = set()
+
+    def _add(user_id: int | None, story, note: str = "") -> None:
+        if user_id is None:
+            return
+        story_id = getattr(story, "id", None)
+        if not story_id:
+            return
+        key = (user_id, story_id)
+        if key in seen:
+            return
+        seen.add(key)
+        pending.append((user_id, story, note))
+
+    try:
+        state: str | None = None
+        while True:
+            result = await client(
+                GetAllStoriesRequest(state=state) if state else GetAllStoriesRequest()
+            )
+            if getattr(result, "peer_stories", None) is None:
+                break
+            for peer_story in result.peer_stories:
+                peer = getattr(peer_story, "peer", None)
+                if not is_user_peer(peer):
+                    continue
+                user_id = peer_to_user_id(peer)
+                for story in extract_story_items(peer_story):
+                    note = ""
+                    if story_mentions_user(story, owner_user_id):
+                        note = " (تگ‌شده)"
+                    _add(user_id, story, note)
+            if not getattr(result, "has_more", False):
+                break
+            state = getattr(result, "state", None)
+            if not state:
+                break
+    except Exception:
+        logger.warning("GetAllStories failed", exc_info=True)
+
+    for user_id in tracked_ids:
+        try:
+            peer = await client.get_input_entity(user_id)
+            result = await client(GetPeerStoriesRequest(peer=peer))
+            for story in extract_story_items(result):
+                note = ""
+                if story_mentions_user(story, owner_user_id):
+                    note = " (تگ‌شده)"
+                _add(user_id, story, note)
+        except Exception:
+            logger.debug("GetPeerStories failed target=%s", user_id, exc_info=True)
+
+    return pending
 
 
 async def _scan_stories(ctx: JobContext) -> None:
@@ -129,65 +152,47 @@ async def _scan_stories(ctx: JobContext) -> None:
                 continue
             targets = await TrackedTargetRepository(session).list_for_account(account_id)
 
-        for target in targets:
-            if not target.track_stories:
-                continue
+        tracked_ids = {t.target_user_id for t in targets if t.track_stories}
+        owner_user_id = managed.account.telegram_id
+        notify_chat_id = managed.account.bot_chat_id or owner_user_id
+        download_media = True
+        lock = account_client_lock(account_id)
+
+        try:
+            async with lock:
+                story_sources = await _collect_story_sources(
+                    managed.client,
+                    owner_user_id=owner_user_id,
+                    tracked_ids=tracked_ids,
+                )
+        except Exception:
+            logger.warning("Story collection failed account=%s", account_id, exc_info=True)
+            continue
+
+        for user_id, story, note in story_sources:
             try:
-                peer = await managed.client.get_input_entity(target.target_user_id)
-                result = await managed.client(GetPeerStoriesRequest(peer=peer))
-                stories = getattr(getattr(result, "stories", None), "stories", None) or []
+                async with lock:
+                    saved = await archive_story_item(
+                        client=managed.client,
+                        session_factory=ctx.session_factory,
+                        account_id=account_id,
+                        target_user_id=user_id,
+                        story=story,
+                        media_dir=media_dir,
+                        download_media=download_media,
+                        notify_bot=ctx.bot,
+                        notify_chat_id=notify_chat_id,
+                        mention_note=note,
+                    )
             except Exception:
-                logger.debug(
-                    "Story fetch failed target=%s",
-                    target.target_user_id,
+                logger.warning(
+                    "Story archive failed account=%s target=%s",
+                    account_id,
+                    user_id,
                     exc_info=True,
                 )
                 continue
-
-            for story in stories:
-                story_id = getattr(story, "id", None)
-                if not story_id:
-                    continue
-
-                async with ctx.session_factory() as session:
-                    repo = ContactTrackingRepository(session)
-                    if await repo.has_story_archived(
-                        account_id=account_id,
-                        target_user_id=target.target_user_id,
-                        story_id=story_id,
-                    ):
-                        continue
-
-                media_path = None
-                try:
-                    target_path = media_dir / f"{account_id}_{target.target_user_id}_{story_id}"
-                    downloaded = await managed.client.download_media(story, file=str(target_path))
-                    if downloaded:
-                        media_path = str(downloaded)
-                except Exception:
-                    logger.debug(
-                        "Story download failed story_id=%s",
-                        story_id,
-                        exc_info=True,
-                    )
-
-                async with ctx.session_factory() as session:
-                    await ContactTrackingRepository(session).add_story_archive(
-                        account_id=account_id,
-                        target_user_id=target.target_user_id,
-                        story_id=story_id,
-                        media_path=media_path,
-                    )
-                    await session.commit()
-
-                if media_path and ctx.bot:
-                    chat_id = managed.account.bot_chat_id or managed.account.telegram_id
-                    await ctx.bot.send_message(
-                        chat_id,
-                        f"📖 استوری جدید از <code>{target.target_user_id}</code> ذخیره شد.",
-                        protect_content=True,
-                    )
-
+            if saved:
                 await asyncio.sleep(0.3)
 
 
@@ -205,6 +210,7 @@ def register_jobs(ctx: JobContext) -> None:
         replace_existing=True,
         max_instances=1,
         coalesce=True,
+        next_run_time=datetime.now(),
     )
 
     async def story_job() -> None:
@@ -220,4 +226,5 @@ def register_jobs(ctx: JobContext) -> None:
         replace_existing=True,
         max_instances=1,
         coalesce=True,
+        next_run_time=datetime.now(),
     )
