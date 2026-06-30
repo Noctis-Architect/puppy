@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Message Guard (Puppy) — نصب / به‌روزرسانی از GitHub
-# Installer v3.0.2
+# Installer v3.0.3
 #
 # نصب:   curl -fsSL https://raw.githubusercontent.com/Noctis-Architect/puppy/main/install.sh | bash
 # آپدیت: curl -fsSL https://raw.githubusercontent.com/Noctis-Architect/puppy/main/install.sh | bash -s -- -u
 set -eo pipefail
 
-INSTALLER_VERSION="3.0.2"
+INSTALLER_VERSION="3.0.3"
 
 GITHUB_REPO="Noctis-Architect/puppy"
 DEFAULT_BRANCH="main"
@@ -26,6 +26,19 @@ info()  { echo -e "${CYAN}▸${NC} $*"; }
 ok()    { echo -e "${GREEN}✔${NC} $*"; }
 warn()  { echo -e "${YELLOW}⚠${NC} $*"; }
 fail()  { echo -e "${RED}✖${NC} $*"; exit 1; }
+
+# curl | bash uses stdin for the script; read must use the terminal.
+prompt_tty() {
+    local prompt="$1"
+    local var="$2"
+    if [[ -r /dev/tty ]]; then
+        read -rp "$prompt" "$var" </dev/tty
+    elif [[ -n "${!var:-}" ]]; then
+        return 0
+    else
+        fail "ورودی تعاملی لازم است (یا ${var} را export کنید)"
+    fi
+}
 
 UPDATE_MODE=0
 SKIP_SERVICE_PROMPT=0
@@ -195,9 +208,11 @@ if [[ -f "$CONFIG_FILE" ]]; then
     ok "config.json حفظ شد"
 elif [[ -f "$EXAMPLE_FILE" ]]; then
     cp "$EXAMPLE_FILE" "$CONFIG_FILE"
+    BOT_TOKEN="${PUPPY_BOT_TOKEN:-}"
+    SUPER_ADMIN="${PUPPY_SUPER_ADMIN_ID:-}"
     echo ""
-    read -rp "  bot_token: " BOT_TOKEN
-    read -rp "  super_admin_id: " SUPER_ADMIN
+    [[ -z "$BOT_TOKEN" ]] && prompt_tty "  bot_token: " BOT_TOKEN
+    [[ -z "$SUPER_ADMIN" ]] && prompt_tty "  super_admin_id: " SUPER_ADMIN
     python3 - "$CONFIG_FILE" "$BOT_TOKEN" "$SUPER_ADMIN" <<'PY'
 import json, sys
 path, bot_token, super_admin = sys.argv[1:4]
@@ -240,8 +255,19 @@ echo "  اجرا: ${VENV_DIR}/bin/python main.py run"
 echo ""
 
 if [[ "$SKIP_SERVICE_PROMPT" -eq 0 && "$INSTALL_MODE" == "fresh" ]]; then
-    read -rp "نصب systemd؟ [y/N] " INSTALL_SERVICE
-    if [[ "${INSTALL_SERVICE,,}" == y* ]]; then
+    INSTALL_SERVICE="${PUPPY_INSTALL_SERVICE:-}"
+    if [[ -z "$INSTALL_SERVICE" ]]; then
+        if [[ -r /dev/tty ]]; then
+            prompt_tty "نصب systemd? [y/N] " INSTALL_SERVICE
+        else
+            INSTALL_SERVICE=n
+        fi
+    fi
+    case "${INSTALL_SERVICE,,}" in
+        y|yes) INSTALL_SERVICE=y ;;
+        *) INSTALL_SERVICE=n ;;
+    esac
+    if [[ "$INSTALL_SERVICE" == y ]]; then
         if [[ $EUID -eq 0 ]]; then bash "${INSTALL_DIR}/install-service.sh"
         else sudo bash "${INSTALL_DIR}/install-service.sh"; fi
     fi
