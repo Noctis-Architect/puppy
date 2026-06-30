@@ -68,6 +68,28 @@ class MessageRepository:
         await self._session.flush()
         return message
 
+    async def attach_media(
+        self,
+        *,
+        account_id: int,
+        chat_id: int,
+        message_id: int,
+        media_type: str | None,
+        media_path: str | None,
+    ) -> None:
+        message = await self.get_by_id(
+            account_id=account_id,
+            chat_id=chat_id,
+            message_id=message_id,
+        )
+        if message is None:
+            return
+        if media_type:
+            message.media_type = media_type
+        if media_path:
+            message.media_path = media_path
+        await self._session.flush()
+
     async def get_by_message_ids(
         self,
         *,

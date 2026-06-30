@@ -23,3 +23,8 @@ def account_client_lock(account_id: int) -> asyncio.Lock:
         lock = asyncio.Lock()
         _account_locks[account_id] = lock
     return lock
+
+
+def account_client_busy(account_id: int) -> bool:
+    """True while a user-initiated Telethon command holds the account lock."""
+    return account_client_lock(account_id).locked()

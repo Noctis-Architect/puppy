@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime
 
@@ -9,7 +10,6 @@ from app.core.module_api import TelethonContext
 from app.modules.archive.notifier import NotifierService
 from app.modules.archive.repository import MessageRepository
 from app.modules.settings.repository import MonitoredChatRepository
-from app.telegram.client_utils import resolve_event_message
 from app.telegram.utils import extract_message_text, is_bot_entity
 
 logger = logging.getLogger(__name__)
@@ -34,19 +34,14 @@ def register_events(ctx: TelethonContext) -> None:
     account_id = ctx.account_id
     session_factory = ctx.session_factory
 
-    @client.on(events.MessageEdited())
-    async def on_message_edited(event: events.MessageEdited.Event) -> None:
-        chat_id = event.chat_id
-        message_id = event.message.id
+    async def _handle_edit(message) -> None:
+        chat_id = message.chat_id
+        message_id = message.id
         if chat_id is None or not message_id:
             return
 
         try:
             if not await _should_track_edit(session_factory, account_id, chat_id):
-                return
-
-            message = await resolve_event_message(client, chat_id, message_id)
-            if message is None:
                 return
 
             sender = await message.get_sender()
@@ -89,3 +84,7 @@ def register_events(ctx: TelethonContext) -> None:
                 chat_id,
                 message_id,
             )
+
+    @client.on(events.MessageEdited())
+    async def on_message_edited(event: events.MessageEdited.Event) -> None:
+        asyncio.create_task(_handle_edit(event.message))

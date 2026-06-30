@@ -11,7 +11,75 @@ from app.modules.archive.repository import MessageRepository
 from app.telegram.utils import extract_message_text, format_sender_name, is_bot_entity
 from telethon.tl.custom.message import Message
 
+
 logger = logging.getLogger(__name__)
+
+
+async def persist_incoming_message(
+    *,
+    client,
+    session_factory: async_sessionmaker[AsyncSession],
+    account_id: int,
+    message: Message,
+    media_dir: Path,
+    check_tracked_skip: bool = True,
+    is_read: bool = False,
+    read_at: datetime | None = None,
+) -> None:
+    """Save message metadata immediately, then download media without blocking."""
+    sender = await message.get_sender()
+    if is_bot_entity(sender):
+        return
+
+    sender_id = sender.id if sender else message.chat_id
+    if check_tracked_skip:
+        async with session_factory() as session:
+            from app.modules.settings.repository import TrackedTargetRepository
+
+            target = await TrackedTargetRepository(session).get_target(
+                account_id=account_id,
+                target_user_id=sender_id,
+            )
+            if target is not None and not target.track_messages:
+                return
+
+    async with session_factory() as session:
+        await MessageService(session).store_incoming(
+            account_id=account_id,
+            message=message,
+            is_read=is_read,
+            read_at=read_at,
+        )
+        await session.commit()
+
+    if not message.media:
+        return
+
+    async with session_factory() as session:
+        from app.modules.settings.repository import AccountSettingsRepository
+
+        settings = await AccountSettingsRepository(session).get_or_create(account_id)
+        archive_media = settings.archive_media
+
+    media_type, media_path = await MediaArchiveService.maybe_download(
+        client=client,
+        message=message,
+        account_id=account_id,
+        media_dir=media_dir,
+        archive_media=archive_media,
+    )
+    if not media_path:
+        return
+
+    async with session_factory() as session:
+        await MessageRepository(session).attach_media(
+            account_id=account_id,
+            chat_id=message.chat_id,
+            message_id=message.id,
+            media_type=media_type,
+            media_path=media_path,
+        )
+        await session.commit()
 
 
 class MessageService:
