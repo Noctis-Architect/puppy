@@ -94,6 +94,12 @@ sudo bash ~/puppy/install-service.sh
 curl -fsSL https://raw.githubusercontent.com/Noctis-Architect/puppy/main/install.sh | bash -s -- -u
 ```
 
+اگر نصب خراب شده یا پوشه خالی/نیمه‌کاره است، **ترمیم / نصب مجدد** (تنظیمات حفظ می‌شود):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Noctis-Architect/puppy/main/install.sh | bash -s -- --fresh
+```
+
 یا از روی سرور (بدون دانلود دوباره):
 
 ```bash
