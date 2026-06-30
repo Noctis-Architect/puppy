@@ -1,26 +1,63 @@
 from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 
+from app.core.loader import get_modules
+from app.core.module_api import MenuSection
+
+
+def _buttons_for_section(section: MenuSection) -> list[str]:
+    buttons: list[tuple[int, str]] = []
+    for module in get_modules():
+        for btn in module.menu_buttons:
+            if btn.section == section:
+                buttons.append((btn.order, btn.text))
+    buttons.sort(key=lambda item: (item[0], item[1]))
+    return [text for _, text in buttons]
+
+
+def _build_keyboard(texts: list[str], *, columns: int = 1) -> ReplyKeyboardMarkup:
+    rows: list[list[KeyboardButton]] = []
+    row: list[KeyboardButton] = []
+    for text in texts:
+        row.append(KeyboardButton(text=text))
+        if len(row) >= columns:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
+
 
 def main_menu_keyboard() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="📝 ثبت‌نام")],
-            [KeyboardButton(text="🎁 کد معرف دارم")],
-        ],
-        resize_keyboard=True,
-    )
+    texts = _buttons_for_section("main")
+    if not texts:
+        texts = ["📝 ثبت‌نام", "🎁 کد معرف دارم"]
+    return _build_keyboard(texts)
 
 
 def registered_menu_keyboard() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="🗑 پیام‌های حذف شده")],
-            [KeyboardButton(text="🔍 شناسایی پیام ناشناس")],
-            [KeyboardButton(text="🎁 کد معرف من")],
-            [KeyboardButton(text="🚪 لغو ثبت‌نام")],
-        ],
-        resize_keyboard=True,
-    )
+    texts = _buttons_for_section("registered")
+    if not texts:
+        texts = [
+            "🗑 پیام‌های حذف شده",
+            "🔍 شناسایی پیام ناشناس",
+            "🎁 کد معرف من",
+            "🚪 لغو ثبت‌نام",
+        ]
+    return _build_keyboard(texts)
+
+
+def admin_menu_keyboard() -> ReplyKeyboardMarkup:
+    texts = _buttons_for_section("admin")
+    if not texts:
+        texts = [
+            "📊 آمار سرویس",
+            "👥 لیست کاربران",
+            "🔍 جزئیات کاربر",
+            "🗑 حذف کاربر",
+            "📈 فعالیت اخیر",
+            "🔙 خروج از پنل",
+        ]
+    return _build_keyboard(texts, columns=2)
 
 
 def unregister_confirm_keyboard() -> ReplyKeyboardMarkup:
@@ -31,24 +68,6 @@ def unregister_confirm_keyboard() -> ReplyKeyboardMarkup:
         ],
         resize_keyboard=True,
         one_time_keyboard=True,
-    )
-
-
-def admin_menu_keyboard() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [
-                KeyboardButton(text="📊 آمار سرویس"),
-                KeyboardButton(text="👥 لیست کاربران"),
-            ],
-            [
-                KeyboardButton(text="🔍 جزئیات کاربر"),
-                KeyboardButton(text="🗑 حذف کاربر"),
-            ],
-            [KeyboardButton(text="📈 فعالیت اخیر")],
-            [KeyboardButton(text="🔙 خروج از پنل")],
-        ],
-        resize_keyboard=True,
     )
 
 

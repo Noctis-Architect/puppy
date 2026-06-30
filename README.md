@@ -32,7 +32,13 @@
 |--------|---------|
 | 📥 آرشیو پیام | پیام خصوصی میاد → ذخیره می‌شه |
 | 🗑 هشدار حذف | پاکش کرد؟ → برات می‌فرسته |
-| 🔍 شناسایی ناشناس | «کی بود؟» — جواب می‌ده |
+| ✏️ ردیاب ادیت | پیام ویرایش شد؟ → نسخهٔ قبل و بعد |
+| 🔍 شناسایی ناشناس | «کی بود؟» — جواب می‌ده (دستی + خودکار) |
+| 👥 ابزار گروه | ردیابی فرد، گروه‌های تحت‌نظر، منشن و عضو جدید |
+| 🔎 جستجو و اکسپورت | جستجو در آرشیو، پروفایل مخاطب، خروجی مکالمه |
+| ⏰ اتوماسیون | پیام زمان‌بندی‌شده و یادآور |
+| 👁 ردیاب مخاطب | آنلاین/آفلاین و تغییرات پروفایل |
+| ⚙️ تنظیمات | هر قابلیت روشن/خاموش — حالت «نیستم»، بکاپ پیام خودت |
 | 🎁 سیستم معرف | کد معرف بده، دوست بیار |
 | 🛡 پنل ادمین | کاربرا رو ببین، حذف کن، آمار بگیر |
 | 🚪 لغو ثبت‌نام | پشیمون شدی؟ سشن رو بسوزون برو |
@@ -76,7 +82,7 @@ sudo bash install-service.sh     # systemd — بالا بیاد بخواب
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 cp config.example.json config.json   # پرش کن
-mkdir -p data session
+mkdir -p data session media
 python main.py run
 ```
 
@@ -91,9 +97,34 @@ python main.py run
   "bot_token": "از BotFather",
   "super_admin_id": 123456789,
   "database_url": "sqlite+aiosqlite:///data/app.db",
-  "sessions_dir": "session"
+  "sessions_dir": "session",
+  "media_dir": "media",
+  "proxy": {
+    "type": "",
+    "host": "",
+    "port": 0
+  },
+  "cleanup": {
+    "hour": 3,
+    "minute": 0,
+    "timezone": "Asia/Tehran",
+    "retention_days": 90
+  },
+  "monitoring": {
+    "unread_scan_interval_seconds": 60
+  },
+  "logging": {
+    "level": "INFO"
+  }
 }
 ```
+
+| بخش | توضیح |
+|-----|--------|
+| `media_dir` | محل ذخیرهٔ مدیا (مثلاً view-once) |
+| `cleanup` | زمان و مدت نگهداری پیام‌ها در دیتابیس |
+| `monitoring` | فاصلهٔ اسکن پیام‌های خوانده‌نشده |
+| `proxy` | اختیاری — SOCKS5/MTProto برای اتصال Telethon |
 
 ---
 
@@ -118,6 +149,8 @@ python main.py run
 # CLI
 python main.py list-users
 python main.py add-user
+python main.py deactivate-user <id>
+python main.py activate-user <id>
 ```
 
 ---
@@ -129,9 +162,11 @@ python main.py add-user
 3. ثبت‌نام → شماره → کد
 4. از این به بعد هرکی پیامش رو پاک کنه، تو خبر داری
 
+**منوی ثبت‌نام‌شده:** آرشیو حذف‌شده‌ها، شناسایی ناشناس، جستجو، تنظیمات، ابزار گروه، اتوماسیون و بقیه — از کیبورد بات.
+
 **لغو ثبت‌نام:** دکمه «🚪 لغو ثبت‌نام» — سشن می‌پره، مانیتورینگ قطع می‌شه.
 
-**ادمین:** `/admin` — آمار، لیست کاربر، حذف، فعالیت اخیر.
+**ادمین:** `/admin` — آمار، لیست کاربر، حذف، فعالیت اخیر. دستورات CLI: `/stats`، `/users`، `/user <id>`، `/delete <id>`.
 
 ---
 
@@ -139,13 +174,32 @@ python main.py add-user
 
 ```
 puppy/
-├── app/              # مغز
-├── data/             # دیتابیس (gitignore ✓)
-├── session/          # سشن‌ها (gitignore ✓ — حساس!)
-├── config.json       # تنظیمات (gitignore ✓)
+├── app/
+│   ├── core/           # بارگذاری ماژول‌ها (loader، module_api)
+│   ├── modules/        # قابلیت‌ها — هر پوشه یک BotModule
+│   │   ├── registration/   # ثبت‌نام و لغو
+│   │   ├── archive/          # آرشیو، حذف، اسکن، پاکسازی
+│   │   ├── settings/         # تنظیمات کاربر
+│   │   ├── anonymous_reveal/ # شناسایی پیام ناشناس
+│   │   ├── group_tools/      # گروه و ردیابی فرد
+│   │   ├── message_intel/    # ردیاب ادیت
+│   │   ├── contact_tracking/ # آنلاین و پروفایل
+│   │   ├── memory_search/    # جستجو، اکسپورت، خلاصه روزانه
+│   │   ├── automation/       # زمان‌بندی و یادآور
+│   │   └── admin/            # پنل ادمین
+│   ├── bot/            # میان‌افزار، کیبورد، امنیت
+│   ├── db/             # مدل‌های پایه و سشن SQLAlchemy
+│   ├── telegram/       # Telethon — اتصال و pool
+│   └── runtime.py      # نقطهٔ ورود سرویس
+├── data/               # دیتابیس (gitignore ✓)
+├── media/              # فایل‌های مدیا (gitignore ✓)
+├── session/            # سشن‌ها (gitignore ✓ — حساس!)
+├── config.json         # تنظیمات (gitignore ✓)
 ├── install.sh
 └── install-service.sh
 ```
+
+ماژول‌ها به‌صورت خودکار از `app/modules/` کشف می‌شن؛ هر کدام می‌تونه router بات، رویداد Telethon، job زمان‌بندی‌شده و migration سبک داشته باشه.
 
 ---
 
@@ -154,6 +208,7 @@ puppy/
 - `config.json`
 - `session/`
 - `data/`
+- `media/`
 - `venv/`
 - `*.zip`
 

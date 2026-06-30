@@ -17,6 +17,7 @@ _pending_bot_*
 
 # --- Database & local data ---
 data/
+media/
 *.db
 *.db-shm
 *.db-wal

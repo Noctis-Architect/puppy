@@ -4,15 +4,17 @@ import asyncio
 import logging
 import signal
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
 from app.bot.service_context import ServiceContext
 from app.bot.setup import create_bot, create_dispatcher, run_bot
 from app.config import AppConfig
+from app.core.loader import get_modules
+from app.core.module_api import JobContext
 from app.db.models import Account
 from app.db.session import init_db
 from app.logging_setup import setup_logging
-from app.scheduler.cleanup_job import setup_cleanup_scheduler
-from app.scheduler.unread_scan_job import setup_unread_scan_scheduler
-from app.services.unread_scanner import scan_account_unread, scan_all_accounts
+from app.modules.archive.unread_scanner import scan_account_unread, scan_all_accounts
 from app.telegram.pool import ClientPool
 
 logger = logging.getLogger(__name__)
@@ -47,22 +49,20 @@ async def run_service(config: AppConfig) -> None:
         session_factory=session_factory,
         service_context=service_context,
     )
-    scheduler = setup_cleanup_scheduler(session_factory, config.cleanup)
-    scheduler.start()
-    logger.info(
-        "Cleanup scheduled daily at %02d:%02d (%s), retention=%s days",
-        config.cleanup.hour,
-        config.cleanup.minute,
-        config.cleanup.timezone,
-        config.cleanup.retention_days,
-    )
 
-    unread_scheduler = setup_unread_scan_scheduler(pool, session_factory, config.monitoring)
-    unread_scheduler.start()
-    logger.info(
-        "Unread scan scheduled every %s seconds",
-        config.monitoring.unread_scan_interval_seconds,
+    scheduler = AsyncIOScheduler(timezone=config.cleanup.timezone)
+    job_ctx = JobContext(
+        scheduler=scheduler,
+        pool=pool,
+        session_factory=session_factory,
+        config=config,
+        bot=bot,
     )
+    for module in get_modules():
+        if module.register_jobs is not None:
+            module.register_jobs(job_ctx)
+    scheduler.start()
+    logger.info("Module schedulers started (%s job module(s))", len(get_modules()))
 
     stop_event = asyncio.Event()
 
@@ -104,7 +104,6 @@ async def run_service(config: AppConfig) -> None:
     finally:
         await dispatcher.stop_polling()
         await bot.session.close()
-        unread_scheduler.shutdown(wait=False)
         scheduler.shutdown(wait=False)
         await pool.stop_all()
         logger.info("Service stopped.")

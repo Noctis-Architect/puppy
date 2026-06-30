@@ -40,6 +40,7 @@ class AppConfig:
     super_admin_id: int
     database_url: str
     sessions_dir: Path
+    media_dir: Path
     proxy: ProxyConfig | None
     cleanup: CleanupConfig
     monitoring: MonitoringConfig
@@ -87,6 +88,9 @@ class AppConfig:
         sessions_dir = BASE_DIR / str(raw.get("sessions_dir", "session"))
         sessions_dir.mkdir(parents=True, exist_ok=True)
 
+        media_dir = BASE_DIR / str(raw.get("media_dir", "media"))
+        media_dir.mkdir(parents=True, exist_ok=True)
+
         bot_token = str(raw.get("bot_token", "")).strip()
         if not bot_token:
             raise ValueError("bot_token is required in config.json")
@@ -98,6 +102,7 @@ class AppConfig:
             super_admin_id=int(raw.get("super_admin_id", 0)),
             database_url=db_url,
             sessions_dir=sessions_dir,
+            media_dir=media_dir,
             proxy=proxy,
             cleanup=cleanup,
             monitoring=monitoring,

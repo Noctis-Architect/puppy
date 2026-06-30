@@ -69,6 +69,7 @@ class ClientPool:
             account_id=account.id,
             owner_telegram_id=account.telegram_id,
             session_factory=self.session_factory,
+            config=self.config,
             bot=self.bot,
             bot_chat_id=account.bot_chat_id or account.telegram_id,
         )

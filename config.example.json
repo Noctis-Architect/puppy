@@ -5,6 +5,7 @@
   "super_admin_id": 0,
   "database_url": "sqlite+aiosqlite:///data/app.db",
   "sessions_dir": "session",
+  "media_dir": "media",
   "proxy": {
     "type": "",
     "host": "",

@@ -8,14 +8,10 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.config import AppConfig
-from app.bot.handlers import admin as admin_handlers
-from app.bot.handlers import anonymous_reveal as anonymous_reveal_handlers
-from app.bot.handlers import deleted_messages as deleted_messages_handlers
-from app.bot.handlers import register as register_handlers
-from app.bot.handlers import start as start_handlers
 from app.bot.middleware import build_middlewares
 from app.bot.service_context import ServiceContext
+from app.config import AppConfig
+from app.core.loader import get_modules
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +37,10 @@ def create_dispatcher(
     ):
         dispatcher.update.middleware(middleware)
 
-    anonymous_reveal_handlers.register(dispatcher)
-    admin_handlers.register(dispatcher)
-    start_handlers.register(dispatcher)
-    register_handlers.register(dispatcher)
-    deleted_messages_handlers.register(dispatcher)
+    for module in get_modules():
+        for router in module.routers:
+            dispatcher.include_router(router)
+
     return dispatcher
 
 
