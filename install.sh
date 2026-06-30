@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Message Guard (Puppy) — نصب / به‌روزرسانی مستقیم از GitHub
-# Installer v3 — همیشه با curl اجرا کنید، نه bash install.sh قدیمی محلی
+# Message Guard (Puppy) — نصب / به‌روزرسانی از GitHub
+# Installer v3.0.2
 #
 # نصب:   curl -fsSL https://raw.githubusercontent.com/Noctis-Architect/puppy/main/install.sh | bash
 # آپدیت: curl -fsSL https://raw.githubusercontent.com/Noctis-Architect/puppy/main/install.sh | bash -s -- -u
-set -euo pipefail
+set -eo pipefail
 
-INSTALLER_VERSION="3.0.1"
+INSTALLER_VERSION="3.0.2"
 
 GITHUB_REPO="Noctis-Architect/puppy"
 DEFAULT_BRANCH="main"
@@ -42,35 +42,14 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --help|-h)
-            cat <<HELP
-نصب:   curl -fsSL ${RAW_INSTALL_URL} | bash
-آپدیت: curl -fsSL ${RAW_INSTALL_URL} | bash -s -- -u
-ترمیم: curl -fsSL ${RAW_INSTALL_URL} | bash -s -- --fresh
-HELP
+            echo "Installer v${INSTALLER_VERSION}"
+            echo "نصب:   curl -fsSL ${RAW_INSTALL_URL} | bash"
+            echo "آپدیت: curl -fsSL ${RAW_INSTALL_URL} | bash -s -- -u"
             exit 0
             ;;
         *) fail "گزینه ناشناخته: $1" ;;
     esac
 done
-
-_is_piped() {
-    # curl | bash -s : stdin is a pipe; BASH_SOURCE[0] is often unset with set -u
-    [[ ! -t 0 ]]
-}
-
-if [[ -t 0 ]]; then
-    _script="${BASH_SOURCE[0]:-}"
-    if [[ -n "$_script" && -f "$_script" ]]; then
-        local_path="$(cd "$(dirname "$_script")" && pwd)/$(basename "$_script")"
-        if ! grep -q "INSTALLER_VERSION=\"3.0.1\"" "$local_path" 2>/dev/null \
-            && ! grep -q "INSTALLER_VERSION=\"3.0.0\"" "$local_path" 2>/dev/null; then
-            warn "فایل install.sh محلی قدیمی است."
-            echo "  از این دستور استفاده کنید:"
-            echo "  curl -fsSL ${RAW_INSTALL_URL} | bash -s -- --fresh"
-            exit 1
-        fi
-    fi
-fi
 
 has_install_at() {
     [[ -f "${1}/main.py" && -f "${1}/requirements.txt" ]]
@@ -84,17 +63,8 @@ resolve_install_dir() {
     if [[ -f "$MARKER_FILE" ]]; then
         local saved
         saved="$(tr -d '\n' < "$MARKER_FILE")"
-        if [[ -n "$saved" ]] && has_install_at "$saved"; then
+        if [[ -n "$saved" ]]; then
             echo "$saved"
-            return
-        fi
-    fi
-    _script="${BASH_SOURCE[0]:-}"
-    if [[ -n "$_script" && -f "$_script" ]] && ! _is_piped; then
-        local script_dir
-        script_dir="$(cd "$(dirname "$_script")" && pwd)"
-        if has_install_at "$script_dir"; then
-            echo "$script_dir"
             return
         fi
     fi
@@ -137,10 +107,7 @@ else
 fi
 
 echo ""
-info "Installer v${INSTALLER_VERSION} — $([[ "$INSTALL_MODE" == update ]] && echo به‌روزرسانی || echo نصب)"
-if [[ "$INSTALL_MODE" == "fresh" ]]; then
-    warn "ربات شخصی — فقط روی سرور خودتان."
-fi
+info "Installer v${INSTALLER_VERSION} — $([[ "$INSTALL_MODE" == "update" ]] && echo به‌روزرسانی || echo نصب)"
 info "مسیر نصب: ${INSTALL_DIR}"
 echo ""
 
@@ -199,7 +166,7 @@ sync_code() {
             ok "کد به‌روز شد (git)"
             return
         fi
-        warn "git pull ناموفق — fallback به آرشیو"
+        warn "git ناموفق — fallback به آرشیو"
     fi
 
     download_and_merge
@@ -270,7 +237,6 @@ fi
 echo ""
 echo -e "${GREEN}  ✔ تمام${NC} — ${INSTALL_DIR}"
 echo "  اجرا: ${VENV_DIR}/bin/python main.py run"
-echo "  آپدیت: curl -fsSL ${RAW_INSTALL_URL} | bash -s -- -u"
 echo ""
 
 if [[ "$SKIP_SERVICE_PROMPT" -eq 0 && "$INSTALL_MODE" == "fresh" ]]; then
