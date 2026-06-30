@@ -8,6 +8,7 @@ from app.core.module_api import TelethonContext
 from app.modules.archive.service import MessageService
 from app.modules.settings.repository import MonitoredChatRepository
 from app.telegram.client_utils import resolve_event_message
+from app.telegram.utils import is_bot_entity
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,10 @@ def register_events(ctx: TelethonContext) -> None:
         try:
             message = await resolve_event_message(client, chat_id, message_id)
             if message is None:
+                return
+
+            sender = await message.get_sender()
+            if is_bot_entity(sender):
                 return
 
             media_type = None

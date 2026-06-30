@@ -3,6 +3,10 @@ from __future__ import annotations
 from telethon.tl.custom.message import Message
 
 
+def is_bot_entity(entity) -> bool:
+    return bool(entity and getattr(entity, "bot", False))
+
+
 def extract_message_text(message: Message) -> str:
     if message.text:
         return message.text

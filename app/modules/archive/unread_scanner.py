@@ -12,6 +12,7 @@ from app.modules.archive.service import MediaArchiveService, MessageService
 from app.modules.settings.repository import AccountSettingsRepository
 from app.telegram.client_utils import SessionExpiredError, ensure_client_connected
 from app.telegram.pool import ClientPool
+from app.telegram.utils import is_bot_entity
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,8 @@ async def scan_account_unread(
 
             for message in messages:
                 if message.out or not message.id:
+                    continue
+                if is_bot_entity(await message.get_sender()):
                     continue
                 is_read = message.id <= read_inbox_max
 

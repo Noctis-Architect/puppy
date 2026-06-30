@@ -10,7 +10,7 @@ from app.modules.archive.notifier import NotifierService
 from app.modules.archive.repository import MessageRepository
 from app.modules.settings.repository import MonitoredChatRepository
 from app.telegram.client_utils import resolve_event_message
-from app.telegram.utils import extract_message_text
+from app.telegram.utils import extract_message_text, is_bot_entity
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,10 @@ def register_events(ctx: TelethonContext) -> None:
 
             message = await resolve_event_message(client, chat_id, message_id)
             if message is None:
+                return
+
+            sender = await message.get_sender()
+            if is_bot_entity(sender):
                 return
 
             new_text = extract_message_text(message)

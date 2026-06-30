@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.modules.archive.models import StoredMessage
 from app.modules.archive.repository import MessageRepository
-from app.telegram.utils import extract_message_text, format_sender_name
+from app.telegram.utils import extract_message_text, format_sender_name, is_bot_entity
 from telethon.tl.custom.message import Message
 
 logger = logging.getLogger(__name__)
@@ -29,6 +29,8 @@ class MessageService:
         media_path: str | None = None,
     ) -> None:
         sender = await message.get_sender()
+        if is_bot_entity(sender):
+            return
         sender_id = sender.id if sender else message.chat_id
         await self._repo.upsert_incoming(
             account_id=account_id,
