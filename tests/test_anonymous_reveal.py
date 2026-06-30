@@ -61,6 +61,12 @@ def test_normalize_bot_username() -> None:
     assert normalize_bot_username("  xbchatbot ") == "xbchatbot"
 
 
+def test_parse_usinfo_phone() -> None:
+    text = "ID: 7078242821\nUsername: @testuser\nName: Ali\n📱 +98 912 345 6789"
+    parsed = _parse_usinfo_response(7078242821, text)
+    assert parsed.phone == "+98 912 345 6789"
+
+
 def test_parse_usinfo_response() -> None:
     text = "ID: 7078242821\nUsername: @testuser\nName: Ali Reza"
     parsed = _parse_usinfo_response(7078242821, text)
@@ -95,6 +101,10 @@ def test_parse_usinfo_markdown_link_format() -> None:
 def test_response_matches_user() -> None:
     assert _response_matches_user("ID: 7078242821\nUsername: @x", 7078242821)
     assert not _response_matches_user("Hello", 7078242821)
+
+
+def test_response_matches_user_no_substring_false_positive() -> None:
+    assert not _response_matches_user("ID: 1234567890\nUsername: @x", 123)
 
 
 def test_extract_user_id_from_callback() -> None:

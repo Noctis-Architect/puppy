@@ -5,7 +5,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.contact_tracking.models import PresenceEvent, ProfileChange, ProfileSnapshot
+from app.modules.contact_tracking.models import PresenceEvent, ProfileChange, ProfileSnapshot, StoryArchive
 
 
 class ContactTrackingRepository:
@@ -106,6 +106,50 @@ class ContactTrackingRepository:
                 PresenceEvent.target_user_id == target_user_id,
             )
             .order_by(PresenceEvent.at.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def has_story_archived(
+        self, *, account_id: int, target_user_id: int, story_id: int
+    ) -> bool:
+        result = await self._session.execute(
+            select(StoryArchive.id).where(
+                StoryArchive.account_id == account_id,
+                StoryArchive.target_user_id == target_user_id,
+                StoryArchive.story_id == story_id,
+            )
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def add_story_archive(
+        self,
+        *,
+        account_id: int,
+        target_user_id: int,
+        story_id: int,
+        media_path: str | None,
+    ) -> StoryArchive:
+        story = StoryArchive(
+            account_id=account_id,
+            target_user_id=target_user_id,
+            story_id=story_id,
+            media_path=media_path,
+        )
+        self._session.add(story)
+        await self._session.flush()
+        return story
+
+    async def list_stories(
+        self, *, account_id: int, target_user_id: int, limit: int = 10
+    ) -> list[StoryArchive]:
+        result = await self._session.execute(
+            select(StoryArchive)
+            .where(
+                StoryArchive.account_id == account_id,
+                StoryArchive.target_user_id == target_user_id,
+            )
+            .order_by(StoryArchive.saved_at.desc())
             .limit(limit)
         )
         return list(result.scalars().all())

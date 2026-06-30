@@ -1,21 +1,53 @@
 from __future__ import annotations
 
+import logging
+
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
+from aiogram.types import (
+    Message,
+    MessageOriginChannel,
+    MessageOriginChat,
+    MessageOriginUser,
+)
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.bot.access import get_own_account
+from app.bot.concurrency import account_client_lock
 from app.bot.keyboards import registered_menu_keyboard
+from app.bot.service_context import ServiceContext
 from app.modules.group_tools.states import GroupToolsStates
 from app.modules.settings.repository import MonitoredChatRepository, TrackedTargetRepository
 from app.repositories.account_repo import AccountRepository
+from app.telegram.client_utils import SessionExpiredError, ensure_client_connected
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 TRACK_MENU = "👁 ردیابی فرد"
 GROUP_MENU = "👥 گروه‌های تحت‌نظر"
 BACK_BUTTON = "🔙 بازگشت"
+
+
+def _forwarded_user_id(message: Message) -> int | None:
+    origin = message.forward_origin
+    if isinstance(origin, MessageOriginUser):
+        return origin.sender_user.id
+    if message.forward_from:
+        return message.forward_from.id
+    return None
+
+
+def _forwarded_group_info(message: Message) -> tuple[int, str | None] | None:
+    origin = message.forward_origin
+    if isinstance(origin, MessageOriginChannel):
+        return origin.chat.id, origin.chat.title
+    if isinstance(origin, MessageOriginChat):
+        return origin.sender_chat.id, origin.sender_chat.title
+    if message.forward_from_chat:
+        chat = message.forward_from_chat
+        return chat.id, getattr(chat, "title", None)
+    return None
 
 
 @router.message(F.text == TRACK_MENU)
@@ -42,7 +74,7 @@ async def track_menu(
     lines.extend(
         [
             "",
-            "برای افزودن: آیدی عددی یا فوروارد پیام فرد را بفرستید.",
+            "برای افزودن: آیدی عددی، @یوزرنیم، یا فوروارد پیام فرد را بفرستید.",
             "برای حذف: /untrack &lt;آیدی&gt;",
         ]
     )
@@ -50,13 +82,16 @@ async def track_menu(
     await message.answer("\n".join(lines))
 
 
-@router.message(GroupToolsStates.track_add, F.forward_from)
+@router.message(GroupToolsStates.track_add, F.forward_origin)
 async def track_from_forward(
     message: Message,
     state: FSMContext,
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    user_id = message.forward_from.id
+    user_id = _forwarded_user_id(message)
+    if user_id is None:
+        await message.answer("فقط فوروارد پیام از یک کاربر پشتیبانی می‌شود.")
+        return
     await _add_target(message, state, session_factory, user_id)
 
 
@@ -67,6 +102,40 @@ async def track_from_id(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     await _add_target(message, state, session_factory, int(message.text))
+
+
+@router.message(GroupToolsStates.track_add, F.text.regexp(r"^@?[A-Za-z][A-Za-z0-9_]{4,31}$"))
+async def track_from_username(
+    message: Message,
+    state: FSMContext,
+    session_factory: async_sessionmaker[AsyncSession],
+    service_context: ServiceContext | None,
+) -> None:
+    username = (message.text or "").strip().lstrip("@")
+    async with session_factory() as db:
+        account = await get_own_account(AccountRepository(db), message.from_user.id)
+    if not account:
+        await message.answer("ابتدا ثبت‌نام کنید.")
+        return
+    if service_context is None or account.id not in service_context.pool.clients:
+        await message.answer("اتصال اکانت شما فعال نیست. لطفاً چند لحظه صبر کنید.")
+        return
+
+    managed = service_context.pool.clients[account.id]
+    lock = account_client_lock(account.id)
+    async with lock:
+        try:
+            await ensure_client_connected(managed.client)
+            entity = await managed.client.get_entity(username)
+        except SessionExpiredError:
+            await message.answer("سشن تلگرام منقضی شده. دوباره ثبت‌نام کنید.")
+            return
+        except Exception:
+            logger.warning("Could not resolve username @%s", username, exc_info=True)
+            await message.answer(f"کاربر @{username} پیدا نشد.")
+            return
+
+    await _add_target(message, state, session_factory, entity.id, label=f"@{username}")
 
 
 @router.message(GroupToolsStates.track_add, F.text == BACK_BUTTON)
@@ -100,6 +169,8 @@ async def _add_target(
     state: FSMContext,
     session_factory: async_sessionmaker[AsyncSession],
     user_id: int,
+    *,
+    label: str | None = None,
 ) -> None:
     async with session_factory() as db:
         account = await get_own_account(AccountRepository(db), message.from_user.id)
@@ -107,9 +178,19 @@ async def _add_target(
             await state.clear()
             await message.answer("ابتدا ثبت‌نام کنید.")
             return
+        if await TrackedTargetRepository(db).is_tracked(
+            account_id=account.id, target_user_id=user_id
+        ):
+            await state.clear()
+            await message.answer(
+                f"فرد <code>{user_id}</code> قبلاً در لیست ردیابی است.",
+                reply_markup=registered_menu_keyboard(),
+            )
+            return
         await TrackedTargetRepository(db).add(
             account_id=account.id,
             target_user_id=user_id,
+            label=label,
         )
         await db.commit()
 
@@ -153,18 +234,18 @@ async def group_menu(
     await message.answer("\n".join(lines))
 
 
-@router.message(GroupToolsStates.group_add, F.forward_from_chat)
+@router.message(GroupToolsStates.group_add, F.forward_origin)
 async def group_from_forward(
     message: Message,
     state: FSMContext,
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    chat = message.forward_from_chat
-    if not chat:
+    info = _forwarded_group_info(message)
+    if info is None:
+        await message.answer("فقط فوروارد پیام از گروه یا کانال پشتیبانی می‌شود.")
         return
-    await _add_group(
-        message, state, session_factory, chat.id, getattr(chat, "title", None)
-    )
+    chat_id, title = info
+    await _add_group(message, state, session_factory, chat_id, title)
 
 
 @router.message(GroupToolsStates.group_add, F.text.regexp(r"^-\d+$"))
@@ -214,6 +295,15 @@ async def _add_group(
         if not account:
             await state.clear()
             await message.answer("ابتدا ثبت‌نام کنید.")
+            return
+        if await MonitoredChatRepository(db).is_listed(
+            account_id=account.id, chat_id=chat_id
+        ):
+            await state.clear()
+            await message.answer(
+                f"گروه <code>{chat_id}</code> قبلاً در لیست است.",
+                reply_markup=registered_menu_keyboard(),
+            )
             return
         await MonitoredChatRepository(db).add(
             account_id=account.id,

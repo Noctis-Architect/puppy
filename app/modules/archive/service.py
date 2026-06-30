@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from pathlib import Path
 
@@ -9,6 +10,8 @@ from app.modules.archive.models import StoredMessage
 from app.modules.archive.repository import MessageRepository
 from app.telegram.utils import extract_message_text, format_sender_name
 from telethon.tl.custom.message import Message
+
+logger = logging.getLogger(__name__)
 
 
 class MessageService:
@@ -104,7 +107,20 @@ class MediaArchiveService:
         try:
             path = await client.download_media(message, file=str(target))
             if not path:
+                logger.warning(
+                    "Media download returned empty path account=%s chat=%s msg=%s",
+                    account_id,
+                    message.chat_id,
+                    message.id,
+                )
                 return None, None
             return type(message.media).__name__, str(path)
         except Exception:
+            logger.warning(
+                "Media download failed account=%s chat=%s msg=%s",
+                account_id,
+                message.chat_id,
+                message.id,
+                exc_info=True,
+            )
             return None, None

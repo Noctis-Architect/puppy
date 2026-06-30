@@ -6,7 +6,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import AppConfig
-from app.core.loader import discover_modules
+from app.core.loader import get_modules
 from app.db.models import Base
 
 
@@ -19,7 +19,7 @@ def create_engine(config: AppConfig):
 
 
 async def _apply_light_migrations(conn) -> None:
-    modules = discover_modules()
+    modules = get_modules()
 
     def migrate(sync_conn) -> None:
         for module in modules:
@@ -30,7 +30,7 @@ async def _apply_light_migrations(conn) -> None:
 
 
 async def init_db(config: AppConfig) -> async_sessionmaker[AsyncSession]:
-    discover_modules()
+    get_modules()
     engine = create_engine(config)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

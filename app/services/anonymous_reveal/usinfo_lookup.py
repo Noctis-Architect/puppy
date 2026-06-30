@@ -52,6 +52,13 @@ _ID_PATTERNS = (
     re.compile(r"👤\s*`?(\d{5,})`?"),
     re.compile(r"(?:^|\n)(?:ID|Id|آیدی|شناسه)\s*[:：]\s*`?(\d{5,})`?", re.I),
 )
+_PHONE_PATTERNS = (
+    re.compile(r"📱\s*([+\d][\d\s\-()]{7,})"),
+    re.compile(
+        r"(?:^|\n)(?:Phone|Tel|Mobile|تلفن|موبایل)\s*[:：]\s*([+\d][\d\s\-()]{7,})",
+        re.I,
+    ),
+)
 
 
 def _clean_usinfo_text(text: str) -> str:
@@ -71,6 +78,10 @@ def _clean_display_name(name: str) -> str:
 def _has_no_username(text: str) -> bool:
     lowered = text.lower()
     return any(marker in lowered for marker in _NO_USERNAME_MARKERS)
+
+
+def _clean_phone(phone: str) -> str:
+    return re.sub(r"\s+", " ", phone.strip())
 
 
 def _parse_usinfo_response(user_id: int, text: str) -> UserLookup:
@@ -97,10 +108,18 @@ def _parse_usinfo_response(user_id: int, text: str) -> UserLookup:
                 display_name = candidate
                 break
 
+    phone: str | None = None
+    for pattern in _PHONE_PATTERNS:
+        match = pattern.search(cleaned)
+        if match:
+            phone = _clean_phone(match.group(1))
+            break
+
     return UserLookup(
         user_id=user_id,
         username=username,
         display_name=display_name,
+        phone=phone,
         raw_response=text,
     )
 
@@ -109,8 +128,6 @@ def _response_matches_user(text: str, user_id: int) -> bool:
     cleaned = _clean_usinfo_text(text)
     if not cleaned:
         return False
-    if str(user_id) in cleaned:
-        return True
     for pattern in _ID_PATTERNS:
         match = pattern.search(cleaned)
         if match and int(match.group(1)) == user_id:
@@ -176,6 +193,7 @@ def _enrich_from_inline_users(lookup: UserLookup, users, user_id: int) -> UserLo
             user_id=lookup.user_id,
             username=username,
             display_name=display_name,
+            phone=lookup.phone,
             raw_response=lookup.raw_response,
         )
     return lookup

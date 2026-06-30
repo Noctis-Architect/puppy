@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 
 from telethon import events
@@ -8,6 +7,7 @@ from telethon import events
 from app.core.module_api import TelethonContext
 from app.modules.archive.service import MessageService
 from app.modules.settings.repository import MonitoredChatRepository
+from app.telegram.client_utils import resolve_event_message
 
 logger = logging.getLogger(__name__)
 
@@ -17,8 +17,7 @@ def register_events(ctx: TelethonContext) -> None:
     account_id = ctx.account_id
     session_factory = ctx.session_factory
 
-    async def _store_group_message(event: events.NewMessage.Event) -> None:
-        chat_id = event.chat_id
+    async def _store_group_message(chat_id: int, message_id: int) -> None:
         if chat_id is None or chat_id >= 0:
             return
 
@@ -29,9 +28,13 @@ def register_events(ctx: TelethonContext) -> None:
                 return
 
         try:
+            message = await resolve_event_message(client, chat_id, message_id)
+            if message is None:
+                return
+
             media_type = None
             media_path = None
-            if event.message.media:
+            if message.media:
                 from app.modules.archive.service import MediaArchiveService
                 from app.modules.settings.repository import AccountSettingsRepository
 
@@ -43,7 +46,7 @@ def register_events(ctx: TelethonContext) -> None:
 
                 media_type, media_path = await MediaArchiveService.maybe_download(
                     client=client,
-                    message=event.message,
+                    message=message,
                     account_id=account_id,
                     media_dir=ctx.config.media_dir,
                     archive_media=archive_media,
@@ -52,13 +55,18 @@ def register_events(ctx: TelethonContext) -> None:
             async with session_factory() as session:
                 await MessageService(session).store_incoming(
                     account_id=account_id,
-                    message=event.message,
+                    message=message,
                     media_type=media_type,
                     media_path=media_path,
                 )
                 await session.commit()
         except Exception:
-            logger.exception("Failed storing group message account=%s chat=%s", account_id, chat_id)
+            logger.exception(
+                "Failed storing group message account=%s chat=%s msg=%s",
+                account_id,
+                chat_id,
+                message_id,
+            )
 
     @client.on(events.NewMessage())
     async def on_group_message(event: events.NewMessage.Event) -> None:
@@ -66,7 +74,7 @@ def register_events(ctx: TelethonContext) -> None:
             return
         if not event.is_group:
             return
-        asyncio.create_task(_store_group_message(event))
+        await _store_group_message(event.chat_id, event.message.id)
 
     @client.on(events.NewMessage())
     async def on_group_mention(event: events.NewMessage.Event) -> None:
@@ -83,7 +91,7 @@ def register_events(ctx: TelethonContext) -> None:
             from app.modules.settings.repository import AccountSettingsRepository
 
             async with session_factory() as session:
-                if not await MonitoredChatRepository(session).is_monitored(
+                if not await MonitoredChatRepository(session).is_listed(
                     account_id=account_id, chat_id=chat_id
                 ):
                     return
@@ -114,7 +122,7 @@ def register_events(ctx: TelethonContext) -> None:
             from app.modules.settings.repository import AccountSettingsRepository
 
             async with session_factory() as session:
-                if not await MonitoredChatRepository(session).is_monitored(
+                if not await MonitoredChatRepository(session).is_listed(
                     account_id=account_id, chat_id=chat_id
                 ):
                     return

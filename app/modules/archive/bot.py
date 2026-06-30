@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
+from aiogram.types import FSInputFile, Message
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.bot.access import get_own_account
@@ -15,6 +17,7 @@ from app.modules.archive.states import DeletedMessagesStates
 from app.repositories.account_repo import AccountRepository
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 PAGE_SIZE = 5
 BACK_BUTTON = "🔙 بازگشت"
@@ -58,6 +61,22 @@ def _format_deleted_page(*, messages, page: int, total: int) -> str:
     return "\n".join(lines)
 
 
+async def _send_stored_media(message: Message, stored_messages) -> None:
+    for msg in stored_messages:
+        if not msg.media_path:
+            continue
+        path = Path(msg.media_path)
+        if not path.exists():
+            continue
+        try:
+            if path.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}:
+                await message.answer_photo(FSInputFile(path), protect_content=True)
+            else:
+                await message.answer_document(FSInputFile(path), protect_content=True)
+        except Exception:
+            logger.warning("Failed sending archived media %s", path, exc_info=True)
+
+
 async def _show_deleted_page(
     message: Message,
     state: FSMContext,
@@ -95,6 +114,7 @@ async def _show_deleted_page(
         reply_markup=deleted_messages_nav_keyboard(has_prev=has_prev, has_next=has_next),
         protect_content=True,
     )
+    await _send_stored_media(message, messages)
 
 
 @router.message(F.text == MENU_BUTTON)

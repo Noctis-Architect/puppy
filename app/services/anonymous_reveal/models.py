@@ -16,6 +16,7 @@ class UserLookup:
     user_id: int
     username: str | None
     display_name: str | None
+    phone: str | None
     raw_response: str
 
 
@@ -28,6 +29,7 @@ class RevealResult:
     user_id: int
     username: str | None
     display_name: str | None
+    phone: str | None = None
     lookup_failed: bool = False
 
 

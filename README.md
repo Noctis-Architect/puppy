@@ -64,27 +64,52 @@
 
 ---
 
-## 🚀 نصب — سریع و بدون دردسر
+## 🚀 نصب — یک خط
+
+فقط اسکریپت نصب را از GitHub بگیر؛ **خودش کل پروژه را دانلود و نصب می‌کند**:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Noctis-Architect/puppy/main/install.sh | bash
+```
+
+پیش‌فرض نصب در `~/puppy` است. مسیر دیگر:
+
+```bash
+PUPPY_INSTALL_DIR=/opt/puppy curl -fsSL https://raw.githubusercontent.com/Noctis-Architect/puppy/main/install.sh | bash
+```
+
+**سرویس systemd** (یک‌بار بعد از نصب):
+
+```bash
+sudo bash ~/puppy/install-service.sh
+```
+
+---
+
+## 🔄 به‌روزرسانی — همان یک خط
+
+`config.json`، `session/`، `data/` و `media/` **دست نخورده** می‌مانند؛ اگر سرویس نصب باشد خودکار restart می‌شود:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Noctis-Architect/puppy/main/install.sh | bash -s -- -u
+```
+
+یا از روی سرور (بدون دانلود دوباره):
+
+```bash
+bash ~/puppy/install.sh -u
+```
+
+---
+
+## 🛠 نصب دستی (اختیاری — برای توسعه‌دهندگان)
 
 ```bash
 git clone https://github.com/Noctis-Architect/puppy.git
-cd puppy
-
-bash install.sh                  # venv + پکیج + دیتابیس
-sudo bash install-service.sh     # systemd — بالا بیاد بخواب
+cd puppy && bash install.sh --fresh
 ```
 
 > ریپو: [github.com/Noctis-Architect/puppy](https://github.com/Noctis-Architect/puppy)
-
-### دستی هم می‌شه (اگه عاشق کپی‌پیستی)
-
-```bash
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-cp config.example.json config.json   # پرش کن
-mkdir -p data session media
-python main.py run
-```
 
 ---
 

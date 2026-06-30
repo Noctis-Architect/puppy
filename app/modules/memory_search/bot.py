@@ -103,6 +103,12 @@ async def show_profile(
         presence = await ContactTrackingRepository(db).list_presence(
             account_id=account.id, target_user_id=target_id, limit=5
         )
+        stories = await ContactTrackingRepository(db).list_stories(
+            account_id=account.id, target_user_id=target_id, limit=5
+        )
+        deleted = await MessageRepository(db).list_by_sender(
+            account_id=account.id, sender_id=target_id, limit=10, deleted_only=True
+        )
 
     await state.clear()
     lines = [f"📋 <b>پروفایل مخاطب</b> <code>{target_id}</code>", ""]
@@ -111,6 +117,13 @@ async def show_profile(
         for m in msgs:
             flag = " 🗑" if m.deleted_at else ""
             lines.append(f"• {m.text[:60]}{flag}")
+    else:
+        lines.append("• —")
+
+    lines.append("\n<b>پیام‌های حذف‌شده:</b>")
+    if deleted:
+        for m in deleted:
+            lines.append(f"• {m.text[:60]}")
     else:
         lines.append("• —")
 
@@ -126,6 +139,15 @@ async def show_profile(
         for p in presence:
             when = p.at.strftime("%m-%d %H:%M") if p.at else "-"
             lines.append(f"• {p.status} — {when}")
+    else:
+        lines.append("• —")
+
+    lines.append("\n<b>استوری‌های ذخیره‌شده:</b>")
+    if stories:
+        for s in stories:
+            when = s.saved_at.strftime("%m-%d %H:%M") if s.saved_at else "-"
+            media = "📎" if s.media_path else "—"
+            lines.append(f"• {when} {media}")
     else:
         lines.append("• —")
 

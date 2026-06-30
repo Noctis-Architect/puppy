@@ -11,6 +11,14 @@ from app.services.anonymous_reveal.models import ScanResult
 
 BOT_USERNAME_PATTERN = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]{4,31}$")
 DEFAULT_MAX_MESSAGES = 500
+KNOWN_ANON_BOTS = frozenset(
+    {
+        "xbchatbot",
+        "anonchatbot",
+        "anonymouschatbot",
+        "hidechatbot",
+    }
+)
 PROGRESS_EVERY_MESSAGES = 25
 
 ScanProgressCallback = Callable[[int, int, bool, str], Awaitable[None]]

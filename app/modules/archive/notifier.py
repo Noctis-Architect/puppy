@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 from aiogram import Bot
+from aiogram.types import FSInputFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.archive.models import StoredMessage
@@ -62,20 +63,29 @@ class NotifierService:
 
         text = NotifierService._format_deleted_messages(messages=messages)
         if bot and bot_chat_id:
-            if bot_chat_id != owner_telegram_id:
-                return
             await bot.send_message(
                 chat_id=bot_chat_id,
                 text=text,
                 protect_content=True,
             )
             for msg in messages:
-                if msg.media_path and Path(msg.media_path).exists():
-                    path = Path(msg.media_path)
-                    if path.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}:
-                        await bot.send_photo(bot_chat_id, path, protect_content=True)
-                    else:
-                        await bot.send_document(bot_chat_id, path, protect_content=True)
+                if not msg.media_path:
+                    continue
+                path = Path(msg.media_path)
+                if not path.exists():
+                    continue
+                if path.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}:
+                    await bot.send_photo(
+                        bot_chat_id,
+                        FSInputFile(path),
+                        protect_content=True,
+                    )
+                else:
+                    await bot.send_document(
+                        bot_chat_id,
+                        FSInputFile(path),
+                        protect_content=True,
+                    )
             return
 
         await client.send_message("me", text)
@@ -102,7 +112,7 @@ class NotifierService:
         old_text: str,
     ) -> None:
         text = NotifierService.format_edit_notification(message=message, old_text=old_text)
-        if bot and bot_chat_id and bot_chat_id == owner_telegram_id:
+        if bot and bot_chat_id:
             await bot.send_message(chat_id=bot_chat_id, text=text, protect_content=True)
             return
         await client.send_message("me", text)

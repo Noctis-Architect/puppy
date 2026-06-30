@@ -67,6 +67,17 @@ class TrackedTargetRepository:
         )
         return list(result.scalars().all())
 
+    async def get_target(
+        self, *, account_id: int, target_user_id: int
+    ) -> TrackedTarget | None:
+        result = await self._session.execute(
+            select(TrackedTarget).where(
+                TrackedTarget.account_id == account_id,
+                TrackedTarget.target_user_id == target_user_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def is_tracked(self, *, account_id: int, target_user_id: int) -> bool:
         result = await self._session.execute(
             select(TrackedTarget.id).where(
@@ -114,12 +125,31 @@ class MonitoredChatRepository:
         )
         return list(result.scalars().all())
 
+    async def is_listed(self, *, account_id: int, chat_id: int) -> bool:
+        result = await self._session.execute(
+            select(MonitoredChat.id).where(
+                MonitoredChat.account_id == account_id,
+                MonitoredChat.chat_id == chat_id,
+            )
+        )
+        return result.scalar_one_or_none() is not None
+
     async def is_monitored(self, *, account_id: int, chat_id: int) -> bool:
         result = await self._session.execute(
             select(MonitoredChat.id).where(
                 MonitoredChat.account_id == account_id,
                 MonitoredChat.chat_id == chat_id,
                 MonitoredChat.save_deleted.is_(True),
+            )
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def saves_edits(self, *, account_id: int, chat_id: int) -> bool:
+        result = await self._session.execute(
+            select(MonitoredChat.id).where(
+                MonitoredChat.account_id == account_id,
+                MonitoredChat.chat_id == chat_id,
+                MonitoredChat.save_edits.is_(True),
             )
         )
         return result.scalar_one_or_none() is not None

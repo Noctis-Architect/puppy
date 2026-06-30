@@ -14,8 +14,7 @@ from app.core.module_api import JobContext
 from app.db.models import Account
 from app.db.session import init_db
 from app.logging_setup import setup_logging
-from app.modules.archive.unread_scanner import scan_account_unread, scan_all_accounts
-from app.telegram.pool import ClientPool
+from app.telegram.pool import ClientPool, ManagedClient
 
 logger = logging.getLogger(__name__)
 
@@ -25,20 +24,35 @@ async def run_service(config: AppConfig) -> None:
     session_factory = await init_db(config)
     bot = create_bot(config)
     pool = ClientPool(config=config, session_factory=session_factory, bot=bot)
-    account_tasks: list[asyncio.Task] = []
+    client_tasks: dict[int, asyncio.Task] = []
+
+    async def _supervise_client(managed: ManagedClient) -> None:
+        account_id = managed.account.id
+        try:
+            await managed.client.run_until_disconnected()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Telethon client error for account id=%s", account_id)
+        else:
+            logger.warning(
+                "Telethon client disconnected for account id=%s; other accounts keep running",
+                account_id,
+            )
+        finally:
+            client_tasks.pop(account_id, None)
+            if account_id in pool.clients:
+                await pool.stop_account(account_id)
+
+    def _spawn_client_task(managed: ManagedClient) -> asyncio.Task:
+        task = asyncio.create_task(_supervise_client(managed))
+        client_tasks[managed.account.id] = task
+        return task
 
     async def on_new_account(account: Account) -> None:
         try:
             managed = await pool.start_account(account)
-            task = asyncio.create_task(managed.client.run_until_disconnected())
-            account_tasks.append(task)
-            asyncio.create_task(
-                scan_account_unread(
-                    managed.client,
-                    account_id=account.id,
-                    session_factory=session_factory,
-                )
-            )
+            _spawn_client_task(managed)
             logger.info("Live monitoring started for account id=%s", account.id)
         except Exception:
             logger.exception("Failed to start live monitoring for account id=%s", account.id)
@@ -58,11 +72,13 @@ async def run_service(config: AppConfig) -> None:
         config=config,
         bot=bot,
     )
+    job_modules = 0
     for module in get_modules():
         if module.register_jobs is not None:
             module.register_jobs(job_ctx)
+            job_modules += 1
     scheduler.start()
-    logger.info("Module schedulers started (%s job module(s))", len(get_modules()))
+    logger.info("Module schedulers started (%s job module(s))", job_modules)
 
     stop_event = asyncio.Event()
 
@@ -74,34 +90,33 @@ async def run_service(config: AppConfig) -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, _request_shutdown)
 
-    bot_task = asyncio.create_task(run_bot(bot, dispatcher))
-    run_tasks: list[asyncio.Task] = [bot_task]
+    async def _run_bot() -> None:
+        try:
+            await run_bot(bot, dispatcher)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Bot polling stopped unexpectedly")
+
+    bot_task = asyncio.create_task(_run_bot())
 
     try:
         await pool.start_all()
         if pool.clients:
             logger.info("Monitoring %s account(s).", len(pool.clients))
-            asyncio.create_task(scan_all_accounts(pool, session_factory))
-            run_tasks.extend(
-                asyncio.create_task(managed.client.run_until_disconnected())
-                for managed in pool.clients.values()
-            )
+            for managed in pool.clients.values():
+                _spawn_client_task(managed)
         else:
             logger.warning(
                 "No active accounts yet. Bot is running for user registration."
             )
 
-        stop_task = asyncio.create_task(stop_event.wait())
-        done, pending = await asyncio.wait(
-            run_tasks + account_tasks + [stop_task],
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        for task in run_tasks + account_tasks:
-            if task not in done:
-                task.cancel()
-        if pending:
-            await asyncio.gather(*pending, return_exceptions=True)
+        await stop_event.wait()
     finally:
+        bot_task.cancel()
+        for task in list(client_tasks.values()):
+            task.cancel()
+        await asyncio.gather(bot_task, *client_tasks.values(), return_exceptions=True)
         await dispatcher.stop_polling()
         await bot.session.close()
         scheduler.shutdown(wait=False)

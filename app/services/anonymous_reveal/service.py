@@ -112,6 +112,7 @@ class RevealService:
                         user_id=scan_result.user_id,
                         username=lookup.username,
                         display_name=lookup.display_name,
+                        phone=lookup.phone,
                         lookup_failed=False,
                     )
                 )
@@ -130,6 +131,7 @@ class RevealService:
                         user_id=scan_result.user_id,
                         username=None,
                         display_name=None,
+                        phone=None,
                         lookup_failed=True,
                     )
                 )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -37,7 +38,7 @@ def register_jobs(ctx: JobContext) -> None:
 
     async def unread_job() -> None:
         try:
-            await scan_all_accounts(ctx.pool, ctx.session_factory)
+            await scan_all_accounts(ctx.pool, ctx.session_factory, media_dir=ctx.config.media_dir)
         except Exception:
             logger.exception("Unread scan job failed")
 
@@ -48,4 +49,5 @@ def register_jobs(ctx: JobContext) -> None:
         replace_existing=True,
         max_instances=1,
         coalesce=True,
+        next_run_time=datetime.now(),
     )

@@ -1,5 +1,5 @@
 from app.core.module_api import BotModule, MenuButton
-from app.modules.settings import bot, models  # noqa: F401
+from app.modules.settings import bot, migrations, models  # noqa: F401
 
 MODULE = BotModule(
     name="settings",
@@ -8,4 +8,5 @@ MODULE = BotModule(
     menu_buttons=[
         MenuButton(text="⚙️ تنظیمات", section="registered", order=80),
     ],
+    light_migrations=migrations.light_migrations,
 )

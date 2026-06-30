@@ -33,27 +33,20 @@ BACK_BUTTON = "🔙 بازگشت"
 MAX_MESSAGE_LENGTH = 4000
 HEARTBEAT_SECONDS = 4
 
-KNOWN_ANON_BOTS = frozenset(
-    {
-        "xbchatbot",
-        "anonchatbot",
-        "anonymouschatbot",
-        "hidechatbot",
-    }
-)
+def _is_other_menu_button(message: Message) -> bool:
+    """True for any module menu button (except this one) so we don't treat it as a bot username."""
+    text = (message.text or "").strip()
+    if not text or text == MENU_BUTTON:
+        return False
 
-REGISTERED_MENU_BUTTONS = frozenset(
-    {
-        "🗑 پیام‌های حذف شده",
-        MENU_BUTTON,
-        "🎁 کد معرف من",
-        "🔎 جستجو",
-        "⚙️ تنظیمات",
-        "👁 ردیابی فرد",
-        "👥 گروه‌های تحت‌نظر",
-        BACK_BUTTON,
-    }
-)
+    from app.core.loader import get_modules
+
+    for module in get_modules():
+        for btn in module.menu_buttons:
+            if btn.section in ("registered", "main", "admin") and btn.text == text:
+                return True
+    return False
+
 
 _reveal_service = RevealService()
 
@@ -68,6 +61,10 @@ def _format_entry(index: int, entry: RevealResult) -> str:
         lines.append("   👤 (یوزرنیم عمومی ندارد)")
     if entry.display_name:
         lines.append(f"   📛 {entry.display_name}")
+    if entry.phone:
+        lines.append(f"   📱 {entry.phone}")
+    elif not entry.lookup_failed:
+        lines.append("   📱 (در دسترس نیست)")
     lines.append(f"   🔘 {entry.button_text or '-'}")
     lines.append(f"   📎 <code>{entry.decoded_callback}</code>")
     return "\n".join(lines)
@@ -158,7 +155,7 @@ async def cancel_anonymous_reveal(message: Message, state: FSMContext) -> None:
     await message.answer("بازگشت به منو.", reply_markup=registered_menu_keyboard())
 
 
-@router.message(AnonymousRevealStates.waiting_bot_username, F.text.in_(REGISTERED_MENU_BUTTONS - {MENU_BUTTON}))
+@router.message(AnonymousRevealStates.waiting_bot_username, _is_other_menu_button)
 async def ignore_menu_while_waiting(message: Message) -> None:
     await message.answer(
         "لطفاً یوزرنیم ربات ناشناس را ارسال کنید یا «🔙 بازگشت» را بزنید.",

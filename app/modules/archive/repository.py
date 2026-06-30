@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
+from pathlib import Path
 
 from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.archive.models import StoredMessage
+
+logger = logging.getLogger(__name__)
 
 
 class MessageRepository:
@@ -187,13 +191,17 @@ class MessageRepository:
         account_id: int,
         sender_id: int,
         limit: int = 20,
+        deleted_only: bool = False,
     ) -> list[StoredMessage]:
+        conditions = [
+            StoredMessage.account_id == account_id,
+            StoredMessage.sender_id == sender_id,
+        ]
+        if deleted_only:
+            conditions.append(StoredMessage.deleted_at.is_not(None))
         result = await self._session.execute(
             select(StoredMessage)
-            .where(
-                StoredMessage.account_id == account_id,
-                StoredMessage.sender_id == sender_id,
-            )
+            .where(*conditions)
             .order_by(StoredMessage.received_at.desc())
             .limit(limit)
         )
@@ -268,6 +276,23 @@ class MessageRepository:
         return result.rowcount or 0
 
     async def delete_expired_media(self, *, before: datetime) -> int:
+        result = await self._session.execute(
+            select(StoredMessage.media_path).where(
+                and_(
+                    StoredMessage.media_path.is_not(None),
+                    StoredMessage.received_at < before,
+                    StoredMessage.deleted_at.is_(None),
+                )
+            )
+        )
+        for media_path in result.scalars().all():
+            if not media_path:
+                continue
+            try:
+                Path(media_path).unlink(missing_ok=True)
+            except OSError:
+                logger.warning("Could not delete media file %s", media_path, exc_info=True)
+
         result = await self._session.execute(
             delete(StoredMessage).where(
                 and_(

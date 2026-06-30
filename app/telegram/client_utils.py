@@ -21,6 +21,27 @@ async def ensure_client_connected(client: TelegramClient) -> None:
         raise SessionExpiredError("Telethon session expired")
 
 
+async def resolve_event_message(client: TelegramClient, chat_id: int, message_id: int):
+    """Re-fetch a message by id so work is not done on a stale Telethon event object."""
+    if not message_id:
+        return None
+    try:
+        result = await client.get_messages(chat_id, ids=message_id)
+    except Exception:
+        logger.debug(
+            "Could not re-fetch message chat=%s id=%s",
+            chat_id,
+            message_id,
+            exc_info=True,
+        )
+        return None
+    if result is None:
+        return None
+    if isinstance(result, list):
+        return result[0] if result else None
+    return result
+
+
 def message_text(message) -> str:
     if message is None:
         return ""

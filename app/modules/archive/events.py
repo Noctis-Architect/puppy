@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime
 
@@ -10,6 +9,7 @@ from app.core.module_api import TelethonContext
 from app.modules.archive.notifier import DeletionService, NotifierService
 from app.modules.archive.repository import MessageRepository
 from app.modules.archive.service import MessageService
+from app.telegram.client_utils import resolve_event_message
 
 logger = logging.getLogger(__name__)
 
@@ -36,11 +36,28 @@ def register_events(ctx: TelethonContext) -> None:
     account_id = ctx.account_id
     session_factory = ctx.session_factory
 
-    async def _store_message(event: events.NewMessage.Event) -> None:
+    async def _store_message(chat_id: int, message_id: int) -> None:
         try:
+            message = await resolve_event_message(client, chat_id, message_id)
+            if message is None:
+                return
+
+            sender = await message.get_sender()
+            sender_id = sender.id if sender else message.chat_id
+
+            async with session_factory() as session:
+                from app.modules.settings.repository import TrackedTargetRepository
+
+                target = await TrackedTargetRepository(session).get_target(
+                    account_id=account_id,
+                    target_user_id=sender_id,
+                )
+                if target is not None and not target.track_messages:
+                    return
+
             media_type = None
             media_path = None
-            if event.message.media:
+            if message.media:
                 from app.modules.archive.service import MediaArchiveService
                 from app.modules.settings.repository import AccountSettingsRepository
 
@@ -52,7 +69,7 @@ def register_events(ctx: TelethonContext) -> None:
 
                 media_type, media_path = await MediaArchiveService.maybe_download(
                     client=client,
-                    message=event.message,
+                    message=message,
                     account_id=account_id,
                     media_dir=ctx.config.media_dir,
                     archive_media=archive_media,
@@ -61,7 +78,7 @@ def register_events(ctx: TelethonContext) -> None:
             async with session_factory() as session:
                 await MessageService(session).store_incoming(
                     account_id=account_id,
-                    message=event.message,
+                    message=message,
                     media_type=media_type,
                     media_path=media_path,
                 )
@@ -70,8 +87,8 @@ def register_events(ctx: TelethonContext) -> None:
             logger.exception(
                 "Failed storing message account=%s chat=%s msg=%s",
                 account_id,
-                event.chat_id,
-                event.message.id,
+                chat_id,
+                message_id,
             )
 
     async def _notify_deleted(peer_id: int, messages: list) -> None:
@@ -92,7 +109,7 @@ def register_events(ctx: TelethonContext) -> None:
 
     @client.on(events.NewMessage(func=_is_private_incoming))
     async def on_incoming_message(event: events.NewMessage.Event) -> None:
-        asyncio.create_task(_store_message(event))
+        await _store_message(event.chat_id, event.message.id)
 
     @client.on(events.MessageDeleted())
     async def on_message_deleted(event: events.MessageDeleted.Event) -> None:
@@ -101,11 +118,19 @@ def register_events(ctx: TelethonContext) -> None:
         if not deleted_ids:
             return
 
-        if chat_id is not None and chat_id < 0:
+        if chat_id is None:
+            logger.warning(
+                "Skipping deletion without chat_id account=%s ids=%s",
+                account_id,
+                deleted_ids,
+            )
+            return
+
+        if chat_id < 0:
             if not await _is_monitored_group(session_factory, account_id, chat_id):
                 return
 
-        lookup_chat_id = chat_id if chat_id is not None else None
+        lookup_chat_id = chat_id
 
         try:
             async with session_factory() as session:
@@ -122,7 +147,7 @@ def register_events(ctx: TelethonContext) -> None:
                 by_chat.setdefault(msg.chat_id, []).append(msg)
 
             for peer_id, messages in by_chat.items():
-                asyncio.create_task(_notify_deleted(peer_id, messages))
+                await _notify_deleted(peer_id, messages)
         except Exception:
             logger.exception(
                 "Failed handling deletion account=%s chat=%s ids=%s",
@@ -141,30 +166,27 @@ def register_events(ctx: TelethonContext) -> None:
         if not max_id:
             return
 
-        async def _mark_read() -> None:
-            try:
-                async with session_factory() as session:
-                    repo = MessageRepository(session)
-                    updated = await repo.mark_read_up_to(
-                        account_id=account_id,
-                        chat_id=chat_id,
-                        max_message_id=max_id,
-                        read_at=datetime.now().astimezone(),
-                    )
-                    await session.commit()
-                if updated:
-                    logger.debug(
-                        "Marked %s message(s) read account=%s chat=%s",
-                        updated,
-                        account_id,
-                        chat_id,
-                    )
-            except Exception:
-                logger.exception(
-                    "Failed marking read account=%s chat=%s max_id=%s",
+        try:
+            async with session_factory() as session:
+                repo = MessageRepository(session)
+                updated = await repo.mark_read_up_to(
+                    account_id=account_id,
+                    chat_id=chat_id,
+                    max_message_id=max_id,
+                    read_at=datetime.now().astimezone(),
+                )
+                await session.commit()
+            if updated:
+                logger.debug(
+                    "Marked %s message(s) read account=%s chat=%s",
+                    updated,
                     account_id,
                     chat_id,
-                    max_id,
                 )
-
-        asyncio.create_task(_mark_read())
+        except Exception:
+            logger.exception(
+                "Failed marking read account=%s chat=%s max_id=%s",
+                account_id,
+                chat_id,
+                max_id,
+            )

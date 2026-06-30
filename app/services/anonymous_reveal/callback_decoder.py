@@ -5,6 +5,7 @@ import binascii
 import re
 
 USER_ID_PATTERN = re.compile(r"^[a-zA-Z&_]+-(\d{5,})$")
+FALLBACK_USER_ID_PATTERN = re.compile(r"(?:^|[\s/])(?:block|reply|user|report|ban)-(\d{5,})")
 PREFERRED_CALLBACK_PREFIXES = ("block", "report", "ban", "reply", "user")
 
 
@@ -24,10 +25,14 @@ def decode_callback_data(data: bytes) -> str | None:
 
 
 def extract_user_id(decoded: str) -> int | None:
-    match = USER_ID_PATTERN.match(decoded.strip())
-    if not match:
-        return None
-    return int(match.group(1))
+    stripped = decoded.strip()
+    match = USER_ID_PATTERN.match(stripped)
+    if match:
+        return int(match.group(1))
+    fallback = FALLBACK_USER_ID_PATTERN.search(stripped)
+    if fallback:
+        return int(fallback.group(1))
+    return None
 
 
 def callback_priority(decoded: str) -> int:
