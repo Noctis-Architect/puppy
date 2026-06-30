@@ -70,21 +70,18 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
         fail "config.example.json یافت نشد"
     fi
     echo ""
-    info "تنظیم config.json — مقادیر زیر را از my.telegram.org و BotFather بگیرید:"
+    info "تنظیم config.json — api_id و api_hash از قبل در نمونه تنظیم شده‌اند."
+    info "مقادیر زیر را از BotFather و @userinfobot بگیرید:"
     echo ""
 
-    read -rp "  api_id: " API_ID
-    read -rp "  api_hash: " API_HASH
     read -rp "  bot_token: " BOT_TOKEN
     read -rp "  super_admin_id (تلگرام ID شما): " SUPER_ADMIN
 
-    python3 - "$CONFIG_FILE" "$API_ID" "$API_HASH" "$BOT_TOKEN" "$SUPER_ADMIN" <<'PY'
+    python3 - "$CONFIG_FILE" "$BOT_TOKEN" "$SUPER_ADMIN" <<'PY'
 import json, sys
-path, api_id, api_hash, bot_token, super_admin = sys.argv[1:6]
+path, bot_token, super_admin = sys.argv[1:4]
 with open(path, encoding="utf-8") as f:
     cfg = json.load(f)
-cfg["api_id"] = int(api_id)
-cfg["api_hash"] = api_hash.strip()
 cfg["bot_token"] = bot_token.strip()
 cfg["super_admin_id"] = int(super_admin)
 with open(path, "w", encoding="utf-8") as f:

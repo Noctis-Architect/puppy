@@ -58,8 +58,8 @@
 
 - لینوکس (دیبیاَن/اوبونتو — آره، ویندوز نه)
 - Python 3.11+
-- `api_id` + `api_hash` از [my.telegram.org](https://my.telegram.org)
 - `bot_token` از [@BotFather](https://t.me/BotFather)
+- (`api_id` + `api_hash` در `config.example.json` از قبل تنظیم شده — نیازی به my.telegram.org نیست)
 - تلگرام ID خودت برای `super_admin_id`
 
 ---
@@ -92,8 +92,8 @@ python main.py run
 
 ```json
 {
-  "api_id": 12345678,
-  "api_hash": "از my.telegram.org",
+  "api_id": 27758062,
+  "api_hash": "از قبل در config.example.json",
   "bot_token": "از BotFather",
   "super_admin_id": 123456789,
   "database_url": "sqlite+aiosqlite:///data/app.db",
