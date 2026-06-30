@@ -6,7 +6,7 @@
 # آپدیت: curl -fsSL https://raw.githubusercontent.com/Noctis-Architect/puppy/main/install.sh | bash -s -- -u
 set -euo pipefail
 
-INSTALLER_VERSION="3.0.0"
+INSTALLER_VERSION="3.0.1"
 
 GITHUB_REPO="Noctis-Architect/puppy"
 DEFAULT_BRANCH="main"
@@ -54,17 +54,21 @@ HELP
 done
 
 _is_piped() {
-    local script_path="${BASH_SOURCE[0]:-$0}"
-    [[ "$script_path" == /dev/fd/* || "$script_path" == /proc/self/fd/* ]]
+    # curl | bash -s : stdin is a pipe; BASH_SOURCE[0] is often unset with set -u
+    [[ ! -t 0 ]]
 }
 
-if ! _is_piped; then
-    local_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
-    if ! grep -q "INSTALLER_VERSION=\"3.0.0\"" "$local_path" 2>/dev/null; then
-        warn "فایل install.sh محلی قدیمی است."
-        echo "  از این دستور استفاده کنید:"
-        echo "  curl -fsSL ${RAW_INSTALL_URL} | bash -s -- --fresh"
-        exit 1
+if [[ -t 0 ]]; then
+    _script="${BASH_SOURCE[0]:-}"
+    if [[ -n "$_script" && -f "$_script" ]]; then
+        local_path="$(cd "$(dirname "$_script")" && pwd)/$(basename "$_script")"
+        if ! grep -q "INSTALLER_VERSION=\"3.0.1\"" "$local_path" 2>/dev/null \
+            && ! grep -q "INSTALLER_VERSION=\"3.0.0\"" "$local_path" 2>/dev/null; then
+            warn "فایل install.sh محلی قدیمی است."
+            echo "  از این دستور استفاده کنید:"
+            echo "  curl -fsSL ${RAW_INSTALL_URL} | bash -s -- --fresh"
+            exit 1
+        fi
     fi
 fi
 
@@ -85,10 +89,10 @@ resolve_install_dir() {
             return
         fi
     fi
-    local script_path="${BASH_SOURCE[0]:-$0}"
-    if [[ -f "$script_path" ]] && ! _is_piped; then
+    _script="${BASH_SOURCE[0]:-}"
+    if [[ -n "$_script" && -f "$_script" ]] && ! _is_piped; then
         local script_dir
-        script_dir="$(cd "$(dirname "$script_path")" && pwd)"
+        script_dir="$(cd "$(dirname "$_script")" && pwd)"
         if has_install_at "$script_dir"; then
             echo "$script_dir"
             return
