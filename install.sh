@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Message Guard (Puppy) — نصب / به‌روزرسانی از GitHub
-# Installer v3.0.3
+# Installer v3.0.4
 #
 # نصب:   curl -fsSL https://raw.githubusercontent.com/Noctis-Architect/puppy/main/install.sh | bash
 # آپدیت: curl -fsSL https://raw.githubusercontent.com/Noctis-Architect/puppy/main/install.sh | bash -s -- -u
 set -eo pipefail
 
-INSTALLER_VERSION="3.0.3"
+INSTALLER_VERSION="3.0.4"
 
 GITHUB_REPO="Noctis-Architect/puppy"
 DEFAULT_BRANCH="main"
@@ -27,17 +27,88 @@ ok()    { echo -e "${GREEN}✔${NC} $*"; }
 warn()  { echo -e "${YELLOW}⚠${NC} $*"; }
 fail()  { echo -e "${RED}✖${NC} $*"; exit 1; }
 
-# curl | bash uses stdin for the script; read must use the terminal.
+# curl | bash feeds the script on stdin — prompts must use /dev/tty directly.
 prompt_tty() {
     local prompt="$1"
-    local var="$2"
-    if [[ -r /dev/tty ]]; then
-        read -rp "$prompt" "$var" </dev/tty
-    elif [[ -n "${!var:-}" ]]; then
+    local name="$2"
+    local reply=""
+    if [[ -r /dev/tty && -w /dev/tty ]]; then
+        printf '%s' "$prompt" >/dev/tty
+        IFS= read -r reply </dev/tty || true
+        printf -v "$name" '%s' "$reply"
+    elif [[ -n "${!name:-}" ]]; then
         return 0
     else
-        fail "ورودی تعاملی لازم است (یا ${var} را export کنید)"
+        fail "ورودی تعاملی لازم است — ${name} را export کنید یا از SSH با tty اجرا کنید"
     fi
+}
+
+config_is_valid() {
+    [[ -f "$CONFIG_FILE" ]] || return 1
+    "${VENV_DIR}/bin/python" - "$CONFIG_FILE" <<'PY' >/dev/null 2>&1
+import json, sys
+path = sys.argv[1]
+try:
+    with open(path, encoding="utf-8") as f:
+        cfg = json.load(f)
+except (OSError, json.JSONDecodeError):
+    sys.exit(1)
+token = str(cfg.get("bot_token", "")).strip()
+if not token or token == "YOUR_BOT_TOKEN_FROM_BotFather":
+    sys.exit(1)
+try:
+    admin_id = int(cfg.get("super_admin_id", 0))
+except (TypeError, ValueError):
+    sys.exit(1)
+if admin_id <= 0:
+    sys.exit(1)
+PY
+}
+
+setup_config() {
+    [[ -f "$EXAMPLE_FILE" ]] || fail "config.example.json یافت نشد"
+
+    if [[ -f "$CONFIG_FILE" ]]; then
+        warn "config.json نامعتبر یا ناقص — پشتیبان گرفته می‌شود"
+        mv "$CONFIG_FILE" "${CONFIG_FILE}.bak.$(date +%s)"
+    fi
+
+    cp "$EXAMPLE_FILE" "$CONFIG_FILE"
+    BOT_TOKEN="${PUPPY_BOT_TOKEN:-}"
+    SUPER_ADMIN="${PUPPY_SUPER_ADMIN_ID:-}"
+
+    echo ""
+    info "تنظیم config.json — bot_token و super_admin_id لازم است"
+    while [[ -z "${BOT_TOKEN// /}" ]]; do
+        prompt_tty "  bot_token: " BOT_TOKEN
+    done
+    while [[ -z "${SUPER_ADMIN// /}" ]]; do
+        prompt_tty "  super_admin_id: " SUPER_ADMIN
+    done
+
+    "${VENV_DIR}/bin/python" - "$CONFIG_FILE" "$BOT_TOKEN" "$SUPER_ADMIN" <<'PY' || fail "ذخیره config.json ناموفق بود"
+import json, sys
+path, bot_token, super_admin = sys.argv[1:4]
+bot_token = bot_token.strip()
+if not bot_token:
+    print("bot_token خالی است", file=sys.stderr)
+    sys.exit(1)
+try:
+    admin_id = int(super_admin.strip())
+except ValueError:
+    print("super_admin_id باید عدد باشد", file=sys.stderr)
+    sys.exit(1)
+if admin_id <= 0:
+    print("super_admin_id باید بزرگ‌تر از ۰ باشد", file=sys.stderr)
+    sys.exit(1)
+with open(path, encoding="utf-8") as f:
+    cfg = json.load(f)
+cfg["bot_token"] = bot_token
+cfg["super_admin_id"] = admin_id
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(cfg, f, ensure_ascii=False, indent=2)
+    f.write("\n")
+PY
 }
 
 UPDATE_MODE=0
@@ -204,29 +275,11 @@ info "نصب پکیج‌ها..."
 "${VENV_DIR}/bin/pip" install -r requirements.txt -q
 ok "پکیج‌ها نصب شدند"
 
-if [[ -f "$CONFIG_FILE" ]]; then
-    ok "config.json حفظ شد"
-elif [[ -f "$EXAMPLE_FILE" ]]; then
-    cp "$EXAMPLE_FILE" "$CONFIG_FILE"
-    BOT_TOKEN="${PUPPY_BOT_TOKEN:-}"
-    SUPER_ADMIN="${PUPPY_SUPER_ADMIN_ID:-}"
-    echo ""
-    [[ -z "$BOT_TOKEN" ]] && prompt_tty "  bot_token: " BOT_TOKEN
-    [[ -z "$SUPER_ADMIN" ]] && prompt_tty "  super_admin_id: " SUPER_ADMIN
-    python3 - "$CONFIG_FILE" "$BOT_TOKEN" "$SUPER_ADMIN" <<'PY'
-import json, sys
-path, bot_token, super_admin = sys.argv[1:4]
-with open(path, encoding="utf-8") as f:
-    cfg = json.load(f)
-cfg["bot_token"] = bot_token.strip()
-cfg["super_admin_id"] = int(super_admin)
-with open(path, "w", encoding="utf-8") as f:
-    json.dump(cfg, f, ensure_ascii=False, indent=2)
-    f.write("\n")
-PY
-    ok "config.json ذخیره شد"
+if config_is_valid; then
+    ok "config.json آماده است"
 else
-    fail "config.example.json یافت نشد"
+    setup_config
+    ok "config.json ذخیره شد"
 fi
 
 "${VENV_DIR}/bin/python" -c "from app.config import AppConfig; AppConfig.load()" \
@@ -257,7 +310,7 @@ echo ""
 if [[ "$SKIP_SERVICE_PROMPT" -eq 0 && "$INSTALL_MODE" == "fresh" ]]; then
     INSTALL_SERVICE="${PUPPY_INSTALL_SERVICE:-}"
     if [[ -z "$INSTALL_SERVICE" ]]; then
-        if [[ -r /dev/tty ]]; then
+        if [[ -r /dev/tty && -w /dev/tty ]]; then
             prompt_tty "نصب systemd? [y/N] " INSTALL_SERVICE
         else
             INSTALL_SERVICE=n
