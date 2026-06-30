@@ -30,6 +30,7 @@ MAX_CONTACT_PEERS_PER_RUN = 40
 
 _profile_scan_running: set[int] = set()
 _story_scan_running: set[int] = set()
+_profile_unresolved_notified: set[tuple[int, int]] = set()
 
 
 async def _scan_profiles(ctx: JobContext) -> None:
@@ -57,6 +58,7 @@ async def _scan_profiles(ctx: JobContext) -> None:
                     break
                 if not target.track_profile:
                     continue
+                key = (account_id, target.target_user_id)
                 try:
                     await capture_profile_snapshot(
                         client=managed.client,
@@ -66,6 +68,7 @@ async def _scan_profiles(ctx: JobContext) -> None:
                         notify_bot=ctx.bot,
                         notify_chat_id=notify_chat_id,
                     )
+                    _profile_unresolved_notified.discard(key)
                 except RPCError as exc:
                     if ctx.bot and notify_chat_id:
                         await ctx.bot.send_message(
@@ -74,12 +77,25 @@ async def _scan_profiles(ctx: JobContext) -> None:
                             protect_content=True,
                         )
                 except Exception:
+                    # Usually means Telethon still cannot resolve this user to an
+                    # entity (no cached access hash) — see _add_target in
+                    # group_tools/bot.py for the same failure mode. Tell the user
+                    # once instead of failing forever in total silence.
                     logger.warning(
                         "Profile fetch failed account=%s target=%s",
                         account_id,
                         target.target_user_id,
                         exc_info=True,
                     )
+                    if ctx.bot and notify_chat_id and key not in _profile_unresolved_notified:
+                        _profile_unresolved_notified.add(key)
+                        await ctx.bot.send_message(
+                            notify_chat_id,
+                            f"⚠️ ردیابی پروفایل <code>{target.target_user_id}</code> هنوز شروع "
+                            "نشده — ربات هنوز نمی‌تونه پروفایلش رو پیدا کنه (نیاز به پیام "
+                            "مشترک یا گروه مشترک داره). به‌محض ممکن‌شدن، خودکار فعال می‌شه.",
+                            protect_content=True,
+                        )
                 await asyncio.sleep(0.3)
         finally:
             _profile_scan_running.discard(account_id)

@@ -26,7 +26,14 @@ async def persist_incoming_message(
     is_read: bool = False,
     read_at: datetime | None = None,
 ) -> None:
-    """Save message metadata immediately, then download media without blocking."""
+    """Download media (if any) first, then save the message with media already attached.
+
+    Media must be downloaded *before* the row is written: a deletion (especially of
+    view-once/self-destructing media, this bot's whole purpose) can arrive within
+    milliseconds of the message itself. If we stored the text first and attached
+    media afterwards in a second commit, a fast deletion could be processed in the
+    gap between the two writes and the alert would go out with no media attached.
+    """
     sender = await message.get_sender()
     if is_bot_entity(sender):
         return
@@ -43,39 +50,29 @@ async def persist_incoming_message(
             if target is not None and not target.track_messages:
                 return
 
+    media_type: str | None = None
+    media_path: str | None = None
+    if message.media:
+        async with session_factory() as session:
+            from app.modules.settings.repository import AccountSettingsRepository
+
+            settings = await AccountSettingsRepository(session).get_or_create(account_id)
+            archive_media = settings.archive_media
+
+        media_type, media_path = await MediaArchiveService.maybe_download(
+            client=client,
+            message=message,
+            account_id=account_id,
+            media_dir=media_dir,
+            archive_media=archive_media,
+        )
+
     async with session_factory() as session:
         await MessageService(session).store_incoming(
             account_id=account_id,
             message=message,
             is_read=is_read,
             read_at=read_at,
-        )
-        await session.commit()
-
-    if not message.media:
-        return
-
-    async with session_factory() as session:
-        from app.modules.settings.repository import AccountSettingsRepository
-
-        settings = await AccountSettingsRepository(session).get_or_create(account_id)
-        archive_media = settings.archive_media
-
-    media_type, media_path = await MediaArchiveService.maybe_download(
-        client=client,
-        message=message,
-        account_id=account_id,
-        media_dir=media_dir,
-        archive_media=archive_media,
-    )
-    if not media_path:
-        return
-
-    async with session_factory() as session:
-        await MessageRepository(session).attach_media(
-            account_id=account_id,
-            chat_id=message.chat_id,
-            message_id=message.id,
             media_type=media_type,
             media_path=media_path,
         )

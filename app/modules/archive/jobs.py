@@ -38,9 +38,7 @@ def register_jobs(ctx: JobContext) -> None:
 
     async def unread_job() -> None:
         try:
-            asyncio.create_task(
-                scan_all_accounts(ctx.pool, ctx.session_factory, media_dir=ctx.config.media_dir)
-            )
+            await scan_all_accounts(ctx.pool, ctx.session_factory, media_dir=ctx.config.media_dir)
         except Exception:
             logger.exception("Unread scan job failed")
 

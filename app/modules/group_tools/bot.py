@@ -214,6 +214,8 @@ async def _add_target(
         await db.commit()
         account_id = account.id
 
+    profile_resolved = False
+    profile_error = False
     if service_context and account_id in service_context.pool.clients:
         managed = service_context.pool.clients[account_id]
         lock = account_client_lock(account_id)
@@ -225,7 +227,15 @@ async def _add_target(
                     account_id=account_id,
                     target_user_id=user_id,
                 )
+            profile_resolved = True
         except Exception:
+            # Most common cause: the userbot session has never seen this user
+            # before (no cached access hash), so Telethon can't resolve a bare
+            # numeric ID to a real entity yet. Messages/online-status tracking
+            # still work (they don't need entity resolution), but profile/name
+            # tracking can't start until the account interacts with this user
+            # somehow (shared group, a message exchange, etc).
+            profile_error = True
             logger.warning(
                 "Initial profile snapshot failed target=%s",
                 user_id,
@@ -233,9 +243,20 @@ async def _add_target(
             )
 
     await state.clear()
+    lines = [
+        f"✅ فرد <code>{user_id}</code> به لیست ردیابی اضافه شد.",
+        "آنلاین‌بودن، استوری و پیام‌هایش ردیابی می‌شود.",
+    ]
+    if profile_resolved:
+        lines.append("تغییرات پروفایل (نام/بیو/عکس) هم از همین الان ردیابی می‌شود.")
+    elif profile_error:
+        lines.append(
+            "⚠️ ردیابی پروفایل (نام/بیو/عکس) فعلاً فعال نشد، چون ربات هنوز پروفایل "
+            "این فرد را نمی‌بیند (باید قبلاً پیامی بینتون رد و بدل شده باشه یا در گروه "
+            "مشترک باشید). به‌محض اینکه ربات بتونه پروفایلش رو ببینه، خودکار شروع می‌شه."
+        )
     await message.answer(
-        f"✅ فرد <code>{user_id}</code> به لیست ردیابی اضافه شد.\n"
-        "تغییرات پروفایل، آنلاین‌بودن، استوری و پیام‌هایش ردیابی می‌شود.",
+        "\n".join(lines),
         reply_markup=registered_menu_keyboard(),
     )
 
