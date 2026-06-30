@@ -66,7 +66,10 @@
 
 ## 🚀 نصب — یک خط
 
-فقط اسکریپت نصب را از GitHub بگیر؛ **خودش کل پروژه را دانلود و نصب می‌کند**:
+فقط اسکریپت نصب را از GitHub بگیر؛ **خودش کل پروژه را دانلود و نصب می‌کند**.
+
+> **مهم:** حتماً با `curl | bash` اجرا کن — `bash install.sh` محلی قدیمی کار نمی‌کند.  
+> اول خط باید ببینی: `Installer v3.0.0`
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Noctis-Architect/puppy/main/install.sh | bash

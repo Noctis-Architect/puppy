@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Message Guard (Puppy) — نصب / به‌روزرسانی مستقیم از GitHub
-# https://github.com/Noctis-Architect/puppy
+# Installer v3 — همیشه با curl اجرا کنید، نه bash install.sh قدیمی محلی
 #
-# نصب:        curl -fsSL .../install.sh | bash
-# به‌روزرسانی: curl -fsSL .../install.sh | bash -s -- -u
+# نصب:   curl -fsSL https://raw.githubusercontent.com/Noctis-Architect/puppy/main/install.sh | bash
+# آپدیت: curl -fsSL https://raw.githubusercontent.com/Noctis-Architect/puppy/main/install.sh | bash -s -- -u
 set -euo pipefail
 
+INSTALLER_VERSION="3.0.0"
+
 GITHUB_REPO="Noctis-Architect/puppy"
-REPO_URL="https://github.com/${GITHUB_REPO}.git"
 DEFAULT_BRANCH="main"
 ARCHIVE_URL="https://github.com/${GITHUB_REPO}/archive/refs/heads/${DEFAULT_BRANCH}.tar.gz"
 RAW_INSTALL_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/${DEFAULT_BRANCH}/install.sh"
@@ -42,17 +43,30 @@ while [[ $# -gt 0 ]]; do
             ;;
         --help|-h)
             cat <<HELP
-نصب:        curl -fsSL ${RAW_INSTALL_URL} | bash
-به‌روزرسانی: curl -fsSL ${RAW_INSTALL_URL} | bash -s -- -u
-نصب مجدد:   curl -fsSL ${RAW_INSTALL_URL} | bash -s -- --fresh
-
-گزینه‌ها: -u آپدیت | --fresh نصب/ترمیم | --dir PATH | --no-service
+نصب:   curl -fsSL ${RAW_INSTALL_URL} | bash
+آپدیت: curl -fsSL ${RAW_INSTALL_URL} | bash -s -- -u
+ترمیم: curl -fsSL ${RAW_INSTALL_URL} | bash -s -- --fresh
 HELP
             exit 0
             ;;
         *) fail "گزینه ناشناخته: $1" ;;
     esac
 done
+
+_is_piped() {
+    local script_path="${BASH_SOURCE[0]:-$0}"
+    [[ "$script_path" == /dev/fd/* || "$script_path" == /proc/self/fd/* ]]
+}
+
+if ! _is_piped; then
+    local_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+    if ! grep -q "INSTALLER_VERSION=\"3.0.0\"" "$local_path" 2>/dev/null; then
+        warn "فایل install.sh محلی قدیمی است."
+        echo "  از این دستور استفاده کنید:"
+        echo "  curl -fsSL ${RAW_INSTALL_URL} | bash -s -- --fresh"
+        exit 1
+    fi
+fi
 
 has_install_at() {
     [[ -f "${1}/main.py" && -f "${1}/requirements.txt" ]]
@@ -63,7 +77,6 @@ resolve_install_dir() {
         echo "$PUPPY_INSTALL_DIR"
         return
     fi
-
     if [[ -f "$MARKER_FILE" ]]; then
         local saved
         saved="$(tr -d '\n' < "$MARKER_FILE")"
@@ -72,11 +85,8 @@ resolve_install_dir() {
             return
         fi
     fi
-
     local script_path="${BASH_SOURCE[0]:-$0}"
-    if [[ -f "$script_path" ]] \
-        && [[ "$script_path" != /dev/fd/* ]] \
-        && [[ "$script_path" != /proc/* ]]; then
+    if [[ -f "$script_path" ]] && ! _is_piped; then
         local script_dir
         script_dir="$(cd "$(dirname "$script_path")" && pwd)"
         if has_install_at "$script_dir"; then
@@ -84,12 +94,10 @@ resolve_install_dir() {
             return
         fi
     fi
-
     if has_install_at "$(pwd)"; then
         echo "$(pwd)"
         return
     fi
-
     echo "${HOME}/puppy"
 }
 
@@ -105,19 +113,17 @@ save_install_dir() {
 
 refresh_local_install_script() {
     command -v curl >/dev/null 2>&1 || return
-    if curl -fsSL "$RAW_INSTALL_URL" -o "${INSTALL_DIR}/install.sh" 2>/dev/null; then
-        chmod +x "${INSTALL_DIR}/install.sh"
-    fi
+    curl -fsSL "$RAW_INSTALL_URL" -o "${INSTALL_DIR}/install.sh" 2>/dev/null && \
+        chmod +x "${INSTALL_DIR}/install.sh" || true
 }
 
-# تشخیص حالت: فقط وجود main.py = نصب شده (نه marker تنها)
 if [[ "$FORCE_FRESH" -eq 1 ]]; then
     INSTALL_MODE="fresh"
 elif [[ "$UPDATE_MODE" -eq 1 ]]; then
     if has_install_at "$INSTALL_DIR"; then
         INSTALL_MODE="update"
     else
-        warn "نصب ناقص بود — در حال نصب/ترمیم..."
+        warn "نصب ناقص — در حال ترمیم..."
         INSTALL_MODE="fresh"
     fi
 elif has_install_at "$INSTALL_DIR"; then
@@ -126,102 +132,90 @@ else
     INSTALL_MODE="fresh"
 fi
 
-if [[ "$INSTALL_MODE" == "update" ]]; then
-    echo ""
-    echo -e "${CYAN}╔══════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║     Message Guard — به‌روزرسانی             ║${NC}"
-    echo -e "${CYAN}╚══════════════════════════════════════════════╝${NC}"
-else
-    echo ""
-    echo -e "${CYAN}╔══════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║       Message Guard — نصب ربات شخصی         ║${NC}"
-    echo -e "${CYAN}╚══════════════════════════════════════════════╝${NC}"
-    warn "این ربات شخصی است — فقط روی سرور خودتان نصب کنید."
-fi
 echo ""
+info "Installer v${INSTALLER_VERSION} — $([[ "$INSTALL_MODE" == update ]] && echo به‌روزرسانی || echo نصب)"
+if [[ "$INSTALL_MODE" == "fresh" ]]; then
+    warn "ربات شخصی — فقط روی سرور خودتان."
+fi
 info "مسیر نصب: ${INSTALL_DIR}"
 echo ""
 
 command -v python3 >/dev/null 2>&1 || fail "python3 نصب نیست."
-info "Python $(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+command -v curl >/dev/null 2>&1 || fail "curl نصب نیست."
+command -v tar >/dev/null 2>&1 || fail "tar نصب نیست."
 python3 -c 'import venv' 2>/dev/null || fail "python3-venv نصب نیست: sudo apt install python3-venv"
-command -v curl >/dev/null 2>&1 || fail "curl نصب نیست: sudo apt install curl"
 
-RSYNC_EXCLUDES=(
-    --exclude 'config.json'
-    --exclude 'session/'
-    --exclude 'data/'
-    --exclude 'media/'
-    --exclude 'venv/'
-    --exclude 'logs/'
-)
+_should_skip_name() {
+    case "$1" in
+        config.json|session|data|media|venv|logs) return 0 ;;
+        *) return 1 ;;
+    esac
+}
 
-download_source_to() {
-    local dest="$1"
+merge_from_archive() {
+    local src="$1"
+    local dest="$2"
     mkdir -p "$dest"
 
-    if command -v git >/dev/null 2>&1; then
-        info "دریافت از GitHub (git)..."
-        local tmpclone
-        tmpclone="$(mktemp -d)"
-        git clone --depth 1 --branch "$DEFAULT_BRANCH" "$REPO_URL" "${tmpclone}/repo"
-        rsync -a "${RSYNC_EXCLUDES[@]}" "${tmpclone}/repo/" "$dest/"
-        rm -rf "$tmpclone"
-        return
-    fi
+    shopt -s dotglob nullglob
+    for entry in "${src}"/*; do
+        [[ -e "$entry" ]] || continue
+        local name="${entry##*/}"
+        _should_skip_name "$name" && continue
+        rm -rf "${dest:?}/${name}"
+        cp -a "$entry" "${dest}/${name}"
+    done
+    shopt -u dotglob nullglob
+}
 
-    command -v tar >/dev/null 2>&1 || fail "git یا tar لازم است: sudo apt install git"
-    command -v rsync >/dev/null 2>&1 || fail "rsync لازم است: sudo apt install rsync"
-
-    info "دریافت از GitHub (آرشیو)..."
+download_and_merge() {
     local tmpdir
     tmpdir="$(mktemp -d)"
+    trap 'rm -rf "$tmpdir"' RETURN
+
+    info "دانلود از GitHub..."
     curl -fsSL "$ARCHIVE_URL" -o "${tmpdir}/src.tar.gz"
     tar xzf "${tmpdir}/src.tar.gz" -C "$tmpdir"
+
     local extracted="${tmpdir}/puppy-${DEFAULT_BRANCH}"
     [[ -d "$extracted" ]] || fail "ساختار آرشیو GitHub غیرمنتظره بود"
-    rsync -a "${RSYNC_EXCLUDES[@]}" "${extracted}/" "$dest/"
-    rm -rf "$tmpdir"
+
+    merge_from_archive "$extracted" "$INSTALL_DIR"
+    ok "فایل‌ها کپی شدند (config / session / data / venv حفظ شدند)"
 }
 
 sync_code() {
     mkdir -p "$INSTALL_DIR"
 
-    if [[ "$INSTALL_MODE" == "update" && -d "${INSTALL_DIR}/.git" ]]; then
-        info "به‌روزرسانی از GitHub (git pull)..."
-        git -C "$INSTALL_DIR" fetch origin "$DEFAULT_BRANCH" --depth 1
-        git -C "$INSTALL_DIR" reset --hard "origin/${DEFAULT_BRANCH}"
-        ok "کد به‌روز شد"
-        return
+    if [[ "$INSTALL_MODE" == "update" && -d "${INSTALL_DIR}/.git" ]] && command -v git >/dev/null 2>&1; then
+        info "به‌روزرسانی با git..."
+        git -C "$INSTALL_DIR" fetch origin "$DEFAULT_BRANCH" --depth 1 2>/dev/null || true
+        if git -C "$INSTALL_DIR" rev-parse "origin/${DEFAULT_BRANCH}" >/dev/null 2>&1; then
+            git -C "$INSTALL_DIR" reset --hard "origin/${DEFAULT_BRANCH}"
+            ok "کد به‌روز شد (git)"
+            return
+        fi
+        warn "git pull ناموفق — fallback به آرشیو"
     fi
 
-    if [[ "$INSTALL_MODE" == "update" ]]; then
-        info "به‌روزرسانی از GitHub..."
-    else
-        info "دریافت پروژه از GitHub..."
-    fi
-    download_source_to "$INSTALL_DIR"
-    ok "کد از GitHub دریافت شد (config و session و data حفظ شدند)"
+    download_and_merge
 }
 
 sync_code
 
-if ! has_install_at "$INSTALL_DIR"; then
-    fail "دریافت کد ناموفق بود — main.py در ${INSTALL_DIR} یافت نشد"
-fi
+has_install_at "$INSTALL_DIR" || fail "main.py در ${INSTALL_DIR} نیست — دانلود ناموفق بود"
 
 save_install_dir
 cd "$INSTALL_DIR"
 refresh_local_install_script
-
 mkdir -p data session logs media
 
 if [[ ! -f "${VENV_DIR}/bin/python" ]]; then
-    info "ساخت محیط مجازی..."
+    info "ساخت venv..."
     python3 -m venv "$VENV_DIR"
 fi
 
-info "نصب وابستگی‌های Python..."
+info "نصب پکیج‌ها..."
 "${VENV_DIR}/bin/pip" install --upgrade pip -q
 "${VENV_DIR}/bin/pip" install -r requirements.txt -q
 ok "پکیج‌ها نصب شدند"
@@ -231,7 +225,6 @@ if [[ -f "$CONFIG_FILE" ]]; then
 elif [[ -f "$EXAMPLE_FILE" ]]; then
     cp "$EXAMPLE_FILE" "$CONFIG_FILE"
     echo ""
-    info "bot_token (BotFather) و super_admin_id (@userinfobot):"
     read -rp "  bot_token: " BOT_TOKEN
     read -rp "  super_admin_id: " SUPER_ADMIN
     python3 - "$CONFIG_FILE" "$BOT_TOKEN" "$SUPER_ADMIN" <<'PY'
@@ -252,7 +245,6 @@ fi
 
 "${VENV_DIR}/bin/python" -c "from app.config import AppConfig; AppConfig.load()" \
     || fail "config.json نامعتبر است"
-ok "پیکربندی معتبر است"
 
 "${VENV_DIR}/bin/python" -c "
 import asyncio
@@ -260,37 +252,27 @@ from app.config import AppConfig
 from app.db.session import init_db
 asyncio.run(init_db(AppConfig.load()))
 "
-ok "دیتابیس آماده است"
+ok "دیتابیس آماده"
 
 if [[ "$INSTALL_MODE" == "update" ]] && command -v systemctl >/dev/null 2>&1; then
     if systemctl is-enabled puppy >/dev/null 2>&1; then
-        info "ری‌استارت سرویس puppy..."
-        if [[ $EUID -eq 0 ]]; then
-            systemctl restart puppy
-        elif command -v sudo >/dev/null 2>&1; then
-            sudo systemctl restart puppy
+        if [[ $EUID -eq 0 ]]; then systemctl restart puppy
+        elif command -v sudo >/dev/null 2>&1; then sudo systemctl restart puppy
         fi
-        ok "سرویس ری‌استارت شد"
+        ok "سرویس restart شد"
     fi
 fi
 
 echo ""
-echo -e "${GREEN}  ✔ $([[ "$INSTALL_MODE" == "update" ]] && echo به‌روزرسانی || echo نصب) انجام شد${NC}"
-echo ""
-echo "  مسیر:  ${INSTALL_DIR}"
-echo "  اجرا:  ${VENV_DIR}/bin/python main.py run"
-echo ""
-echo "  آپدیت بعدی:"
-echo "    curl -fsSL ${RAW_INSTALL_URL} | bash -s -- -u"
+echo -e "${GREEN}  ✔ تمام${NC} — ${INSTALL_DIR}"
+echo "  اجرا: ${VENV_DIR}/bin/python main.py run"
+echo "  آپدیت: curl -fsSL ${RAW_INSTALL_URL} | bash -s -- -u"
 echo ""
 
 if [[ "$SKIP_SERVICE_PROMPT" -eq 0 && "$INSTALL_MODE" == "fresh" ]]; then
-    read -rp "نصب سرویس systemd؟ [y/N] " INSTALL_SERVICE
+    read -rp "نصب systemd؟ [y/N] " INSTALL_SERVICE
     if [[ "${INSTALL_SERVICE,,}" == y* ]]; then
-        if [[ $EUID -eq 0 ]]; then
-            bash "${INSTALL_DIR}/install-service.sh"
-        else
-            sudo bash "${INSTALL_DIR}/install-service.sh"
-        fi
+        if [[ $EUID -eq 0 ]]; then bash "${INSTALL_DIR}/install-service.sh"
+        else sudo bash "${INSTALL_DIR}/install-service.sh"; fi
     fi
 fi
