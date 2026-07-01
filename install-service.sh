@@ -60,7 +60,7 @@ from app.db.session import init_db
 asyncio.run(init_db(AppConfig.load()))
 \""
 
-mkdir -p "$INSTALL_DIR/data" "$INSTALL_DIR/session" "$INSTALL_DIR/logs"
+mkdir -p "$INSTALL_DIR/data" "$INSTALL_DIR/session" "$INSTALL_DIR/media" "$INSTALL_DIR/logs"
 chown -R "${RUN_USER}:${RUN_USER}" "$INSTALL_DIR"
 
 # توقف نمونه قبلی
@@ -95,7 +95,7 @@ SyslogIdentifier=puppy
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=${INSTALL_DIR}/data ${INSTALL_DIR}/session ${INSTALL_DIR}/logs
+ReadWritePaths=${INSTALL_DIR}/data ${INSTALL_DIR}/session ${INSTALL_DIR}/media ${INSTALL_DIR}/logs
 ProtectHome=read-only
 
 [Install]
