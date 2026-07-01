@@ -14,9 +14,13 @@ from app.core.module_api import JobContext
 from app.db.models import Account
 from app.db.session import init_db
 from app.logging_setup import setup_logging
+from app.repositories.account_repo import AccountRepository
 from app.telegram.pool import ClientPool, ManagedClient
 
 logger = logging.getLogger(__name__)
+
+_RECONNECT_INITIAL_DELAY = 5
+_RECONNECT_MAX_DELAY = 300
 
 
 async def run_service(config: AppConfig) -> None:
@@ -24,25 +28,70 @@ async def run_service(config: AppConfig) -> None:
     session_factory = await init_db(config)
     bot = create_bot(config)
     pool = ClientPool(config=config, session_factory=session_factory, bot=bot)
-    client_tasks: dict[int, asyncio.Task] = []
+    client_tasks: dict[int, asyncio.Task] = {}
+    stop_event = asyncio.Event()
 
     async def _supervise_client(managed: ManagedClient) -> None:
         account_id = managed.account.id
-        try:
-            await managed.client.run_until_disconnected()
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("Telethon client error for account id=%s", account_id)
-        else:
-            logger.warning(
-                "Telethon client disconnected for account id=%s; other accounts keep running",
-                account_id,
-            )
-        finally:
-            client_tasks.pop(account_id, None)
+        backoff = _RECONNECT_INITIAL_DELAY
+
+        while not stop_event.is_set():
+            try:
+                await managed.client.run_until_disconnected()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Telethon client error for account id=%s", account_id)
+            else:
+                logger.warning(
+                    "Telethon client disconnected for account id=%s",
+                    account_id,
+                )
+
+            if stop_event.is_set():
+                break
+
             if account_id in pool.clients:
                 await pool.stop_account(account_id)
+
+            logger.info(
+                "Reconnecting account id=%s in %ss...",
+                account_id,
+                backoff,
+            )
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=backoff)
+                break
+            except asyncio.TimeoutError:
+                pass
+
+            if stop_event.is_set():
+                break
+
+            try:
+                async with session_factory() as session:
+                    account = await AccountRepository(session).get_by_id(account_id)
+                if account is None or not account.is_active:
+                    logger.info(
+                        "Account id=%s inactive or removed; stopping supervisor",
+                        account_id,
+                    )
+                    break
+                managed = await pool.start_account(account)
+                backoff = _RECONNECT_INITIAL_DELAY
+                logger.info("Reconnected monitoring for account id=%s", account_id)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception(
+                    "Reconnect failed for account id=%s; retrying",
+                    account_id,
+                )
+                backoff = min(backoff * 2, _RECONNECT_MAX_DELAY)
+
+        client_tasks.pop(account_id, None)
+        if account_id in pool.clients:
+            await pool.stop_account(account_id)
 
     def _spawn_client_task(managed: ManagedClient) -> asyncio.Task:
         task = asyncio.create_task(_supervise_client(managed))
@@ -80,8 +129,6 @@ async def run_service(config: AppConfig) -> None:
     scheduler.start()
     logger.info("Module schedulers started (%s job module(s))", job_modules)
 
-    stop_event = asyncio.Event()
-
     def _request_shutdown() -> None:
         logger.info("Shutdown requested...")
         stop_event.set()
@@ -113,6 +160,7 @@ async def run_service(config: AppConfig) -> None:
 
         await stop_event.wait()
     finally:
+        stop_event.set()
         bot_task.cancel()
         for task in list(client_tasks.values()):
             task.cancel()

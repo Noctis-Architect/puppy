@@ -7,6 +7,7 @@ from datetime import datetime
 from telethon import events
 
 from app.core.module_api import TelethonContext
+from app.modules.archive.message_sync import message_lock, wait_for_store
 from app.modules.archive.notifier import DeletionService, NotifierService
 from app.modules.archive.repository import MessageRepository
 from app.modules.archive.service import persist_incoming_message
@@ -28,6 +29,12 @@ async def _is_monitored_group(session_factory, account_id: int, chat_id: int) ->
             repo = MonitoredChatRepository(session)
             return await repo.is_monitored(account_id=account_id, chat_id=chat_id)
     except Exception:
+        logger.warning(
+            "Failed checking monitored group account=%s chat=%s",
+            account_id,
+            chat_id,
+            exc_info=True,
+        )
         return False
 
 
@@ -37,21 +44,22 @@ def register_events(ctx: TelethonContext) -> None:
     session_factory = ctx.session_factory
 
     async def _store_message(message) -> None:
-        try:
-            await persist_incoming_message(
-                client=client,
-                session_factory=session_factory,
-                account_id=account_id,
-                message=message,
-                media_dir=ctx.config.media_dir,
-            )
-        except Exception:
-            logger.exception(
-                "Failed storing message account=%s chat=%s msg=%s",
-                account_id,
-                getattr(message, "chat_id", None),
-                getattr(message, "id", None),
-            )
+        async with message_lock(account_id, message.id):
+            try:
+                await persist_incoming_message(
+                    client=client,
+                    session_factory=session_factory,
+                    account_id=account_id,
+                    message=message,
+                    media_dir=ctx.config.media_dir,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed storing message account=%s chat=%s msg=%s",
+                    account_id,
+                    getattr(message, "chat_id", None),
+                    getattr(message, "id", None),
+                )
 
     async def _notify_deleted(peer_id: int, messages: list) -> None:
         try:
@@ -90,6 +98,9 @@ def register_events(ctx: TelethonContext) -> None:
 
         async def _handle() -> None:
             try:
+                for message_id in deleted_ids:
+                    await wait_for_store(account_id, message_id)
+
                 async with session_factory() as session:
                     deletion = DeletionService(session)
                     deleted_messages = await deletion.handle_deleted(

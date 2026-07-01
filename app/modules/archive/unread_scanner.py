@@ -43,7 +43,7 @@ async def scan_account_unread(
         try:
             messages = await client.get_messages(dialog.entity, limit=_SCAN_MESSAGE_LIMIT)
         except Exception:
-            logger.debug(
+            logger.warning(
                 "Could not fetch messages account=%s chat=%s",
                 account_id,
                 dialog.id,
@@ -70,7 +70,7 @@ async def scan_account_unread(
                 )
                 stored += 1
             except Exception:
-                logger.debug(
+                logger.warning(
                     "Unread scan store failed account=%s chat=%s msg=%s",
                     account_id,
                     message.chat_id,

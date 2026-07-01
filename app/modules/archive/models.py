@@ -25,6 +25,7 @@ class StoredMessage(Base):
         Index("ix_stored_messages_read_at", "read_at"),
         Index("ix_stored_messages_deleted_at", "deleted_at"),
         Index("ix_stored_messages_account_chat", "account_id", "chat_id"),
+        Index("ix_stored_messages_account_msg", "account_id", "message_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

@@ -6,6 +6,7 @@ import logging
 from telethon import events
 
 from app.core.module_api import TelethonContext
+from app.modules.archive.message_sync import message_lock
 from app.modules.archive.service import persist_incoming_message
 from app.modules.settings.repository import MonitoredChatRepository
 
@@ -28,22 +29,23 @@ def register_events(ctx: TelethonContext) -> None:
             ):
                 return
 
-        try:
-            await persist_incoming_message(
-                client=client,
-                session_factory=session_factory,
-                account_id=account_id,
-                message=message,
-                media_dir=ctx.config.media_dir,
-                check_tracked_skip=False,
-            )
-        except Exception:
-            logger.exception(
-                "Failed storing group message account=%s chat=%s msg=%s",
-                account_id,
-                chat_id,
-                message.id,
-            )
+        async with message_lock(account_id, message.id):
+            try:
+                await persist_incoming_message(
+                    client=client,
+                    session_factory=session_factory,
+                    account_id=account_id,
+                    message=message,
+                    media_dir=ctx.config.media_dir,
+                    check_tracked_skip=False,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed storing group message account=%s chat=%s msg=%s",
+                    account_id,
+                    chat_id,
+                    message.id,
+                )
 
     @client.on(events.NewMessage())
     async def on_group_message(event: events.NewMessage.Event) -> None:
@@ -53,8 +55,7 @@ def register_events(ctx: TelethonContext) -> None:
             return
         asyncio.create_task(_store_group_message(event.message))
 
-    @client.on(events.NewMessage())
-    async def on_group_mention(event: events.NewMessage.Event) -> None:
+    async def _handle_group_mention(event: events.NewMessage.Event) -> None:
         if event.out or event.is_private or not event.is_group:
             return
         if not event.message.mentioned:
@@ -89,8 +90,11 @@ def register_events(ctx: TelethonContext) -> None:
         except Exception:
             logger.debug("Group mention alert failed", exc_info=True)
 
-    @client.on(events.ChatAction())
-    async def on_chat_action(event: events.ChatAction.Event) -> None:
+    @client.on(events.NewMessage())
+    async def on_group_mention(event: events.NewMessage.Event) -> None:
+        asyncio.create_task(_handle_group_mention(event))
+
+    async def _handle_chat_action(event: events.ChatAction.Event) -> None:
         chat_id = event.chat_id
         if chat_id is None or chat_id >= 0:
             return
@@ -122,3 +126,7 @@ def register_events(ctx: TelethonContext) -> None:
                 await ctx.bot.send_message(ctx.bot_chat_id, text, protect_content=True)
         except Exception:
             logger.debug("Chat action alert failed", exc_info=True)
+
+    @client.on(events.ChatAction())
+    async def on_chat_action(event: events.ChatAction.Event) -> None:
+        asyncio.create_task(_handle_chat_action(event))

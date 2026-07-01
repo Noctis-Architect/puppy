@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from telethon import events
@@ -42,8 +43,7 @@ def _format_auto_reveal(
 def register_events(ctx: TelethonContext) -> None:
     client = ctx.client
 
-    @client.on(events.NewMessage(incoming=True))
-    async def on_anon_bot_message(event: events.NewMessage.Event) -> None:
+    async def _handle_anon_bot_message(event: events.NewMessage.Event) -> None:
         if not event.is_private or event.out:
             return
 
@@ -118,3 +118,7 @@ def register_events(ctx: TelethonContext) -> None:
             )
         else:
             await client.send_message("me", text)
+
+    @client.on(events.NewMessage(incoming=True))
+    async def on_anon_bot_message(event: events.NewMessage.Event) -> None:
+        asyncio.create_task(_handle_anon_bot_message(event))

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -49,5 +49,5 @@ def register_jobs(ctx: JobContext) -> None:
         replace_existing=True,
         max_instances=1,
         coalesce=True,
-        next_run_time=datetime.now(),
+        next_run_time=datetime.now() + timedelta(seconds=ctx.config.monitoring.unread_scan_interval_seconds),
     )

@@ -47,3 +47,10 @@ def light_migrations(sync_conn) -> None:
                 "ON stored_messages (deleted_at)"
             )
         )
+    if "ix_stored_messages_account_msg" not in indexes:
+        sync_conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_stored_messages_account_msg "
+                "ON stored_messages (account_id, message_id)"
+            )
+        )

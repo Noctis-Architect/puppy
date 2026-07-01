@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from telethon import events
@@ -17,8 +18,7 @@ def register_events(ctx: TelethonContext) -> None:
     account_id = ctx.account_id
     session_factory = ctx.session_factory
 
-    @client.on(events.UserUpdate())
-    async def on_user_update(event: events.UserUpdate.Event) -> None:
+    async def _handle_user_update(event: events.UserUpdate.Event) -> None:
         user_id = event.user_id
         if not user_id or event.status is None:
             return
@@ -53,8 +53,11 @@ def register_events(ctx: TelethonContext) -> None:
         except Exception:
             logger.debug("Presence tracking failed", exc_info=True)
 
-    @client.on(events.Raw(types=UpdateUserTyping))
-    async def on_user_typing(update: UpdateUserTyping) -> None:
+    @client.on(events.UserUpdate())
+    async def on_user_update(event: events.UserUpdate.Event) -> None:
+        asyncio.create_task(_handle_user_update(event))
+
+    async def _handle_user_typing(update: UpdateUserTyping) -> None:
         user_id = update.user_id
         if not user_id:
             return
@@ -79,3 +82,7 @@ def register_events(ctx: TelethonContext) -> None:
                 )
         except Exception:
             logger.debug("Typing alert failed", exc_info=True)
+
+    @client.on(events.Raw(types=UpdateUserTyping))
+    async def on_user_typing(update: UpdateUserTyping) -> None:
+        asyncio.create_task(_handle_user_typing(update))

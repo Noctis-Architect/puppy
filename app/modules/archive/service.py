@@ -39,8 +39,10 @@ async def persist_incoming_message(
         return
 
     sender_id = sender.id if sender else message.chat_id
-    if check_tracked_skip:
-        async with session_factory() as session:
+    archive_media = True
+
+    async with session_factory() as session:
+        if check_tracked_skip:
             from app.modules.settings.repository import TrackedTargetRepository
 
             target = await TrackedTargetRepository(session).get_target(
@@ -50,15 +52,15 @@ async def persist_incoming_message(
             if target is not None and not target.track_messages:
                 return
 
-    media_type: str | None = None
-    media_path: str | None = None
-    if message.media:
-        async with session_factory() as session:
+        if message.media:
             from app.modules.settings.repository import AccountSettingsRepository
 
             settings = await AccountSettingsRepository(session).get_or_create(account_id)
             archive_media = settings.archive_media
 
+    media_type: str | None = None
+    media_path: str | None = None
+    if message.media:
         media_type, media_path = await MediaArchiveService.maybe_download(
             client=client,
             message=message,
@@ -75,6 +77,7 @@ async def persist_incoming_message(
             read_at=read_at,
             media_type=media_type,
             media_path=media_path,
+            sender=sender,
         )
         await session.commit()
 
@@ -92,8 +95,10 @@ class MessageService:
         read_at: datetime | None = None,
         media_type: str | None = None,
         media_path: str | None = None,
+        sender=None,
     ) -> None:
-        sender = await message.get_sender()
+        if sender is None:
+            sender = await message.get_sender()
         if is_bot_entity(sender):
             return
         sender_id = sender.id if sender else message.chat_id
@@ -152,6 +157,8 @@ class MediaArchiveService:
         media = message.media
         if media is None:
             return False
+        if getattr(media, "ttl_seconds", None):
+            return True
         media_name = type(media).__name__.lower()
         return "once" in media_name or "ttl" in media_name
 
